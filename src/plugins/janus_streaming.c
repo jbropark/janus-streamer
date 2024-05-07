@@ -927,6 +927,7 @@ multistream-test: {
 #include "../utils.h"
 #include "../sdp-utils.h"
 #include "../ip-utils.h"
+#include "../ice.h"
 
 /* Default settings */
 #define JANUS_STREAMING_DEFAULT_SESSION_TIMEOUT 0 /* Overwrite the RTSP session timeout. If set to zero, the RTSP timeout is derived from a session. */
@@ -1285,6 +1286,7 @@ typedef struct janus_streaming_rtp_relay_packet {
 	janus_vp9_svc_info svc_info;
 	/* The following is only relevant for datachannels */
 	gboolean textdata;
+	guint helper_id;
 } janus_streaming_rtp_relay_packet;
 static janus_streaming_rtp_relay_packet exit_packet;
 static void janus_streaming_rtp_relay_packet_free(janus_streaming_rtp_relay_packet *pkt) {
@@ -7788,6 +7790,8 @@ janus_streaming_mountpoint *janus_streaming_create_rtp_source(
 			janus_refcount_increase(&helper->ref);
 			live_rtp->threads = g_list_append(live_rtp->threads, helper);
 		}
+
+		init_prealloc_array(threads, 100);
 	}
 	janus_mutex_unlock(&mountpoints_mutex);
 	/* Finally, create the mountpoint thread itself */
@@ -10260,7 +10264,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 					}
 				}
 				if(gateway != NULL)
-					gateway->relay_rtp(session->handle, &rtp);
+					gateway->relay_streaming_rtp(session->handle, &rtp, packet->helper_id);
 				if(override_mark_bit && !has_marker_bit) {
 					packet->data->markerbit = 0;
 				}
@@ -10342,7 +10346,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 					}
 				}
 				if(gateway != NULL)
-					gateway->relay_rtp(session->handle, &rtp);
+					gateway->relay_streaming_rtp(session->handle, &rtp, packet->helper_id);
 				/* Restore the timestamp and sequence number to what the publisher set them to */
 				packet->data->type = packet->ptype;
 				packet->data->timestamp = htonl(packet->timestamp);
@@ -10370,7 +10374,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 					}
 				}
 				if(gateway != NULL)
-					gateway->relay_rtp(session->handle, &rtp);
+					gateway->relay_streaming_rtp(session->handle, &rtp, packet->helper_id);
 				/* Restore the timestamp and sequence number to what the video source set them to */
 				packet->data->type = packet->ptype;
 				packet->data->timestamp = htonl(packet->timestamp);
@@ -10384,7 +10388,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 			janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length };
 			janus_plugin_rtp_extensions_reset(&rtp.extensions);
 			if(gateway != NULL)
-				gateway->relay_rtp(session->handle, &rtp);
+				gateway->relay_streaming_rtp(session->handle, &rtp, packet->helper_id);
 			/* Restore the timestamp and sequence number to what the video source set them to */
 			packet->data->type = packet->ptype;
 			packet->data->timestamp = htonl(packet->timestamp);
@@ -10478,6 +10482,8 @@ static void *janus_streaming_helper_thread(void *data) {
 		pkt = g_async_queue_pop(helper->queued_packets);
 		if(pkt == &exit_packet)
 			break;
+
+		pkt.helper_id = helper->id;
 		janus_mutex_lock(&helper->mutex);
 		g_list_foreach(helper->viewers,
 			pkt->is_rtp || pkt->is_data ? janus_streaming_relay_rtp_packet : janus_streaming_relay_rtcp_packet,

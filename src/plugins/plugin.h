@@ -368,6 +368,7 @@ struct janus_callbacks {
 	 * @param[in] handle The plugin/gateway session used for this peer
 	 * @param[in] packet The RTP packet and related data */
 	void (* const relay_rtp)(janus_plugin_session *handle, janus_plugin_rtp *packet);
+	void (* const relay_streaming_rtp)(janus_plugin_session *handle, janus_plugin_rtp *packet, guint helper_id);
 	/*! \brief Callback to relay RTCP messages to a peer
 	 * @param[in] handle The plugin/gateway session that will be used for this peer
 	 * @param[in] packet The RTCP packet and related data */

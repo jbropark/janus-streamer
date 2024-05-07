@@ -656,6 +656,26 @@ static inline void janus_ice_free_rtp_packet(janus_rtp_packet *pkt) {
 	g_free(pkt);
 }
 
+typedef struct janus_preallocated_queued_packet {
+	janus_ice_queued_packet pkt;
+	gboolean in_use;
+	gint length;
+} janus_preallocated_queued_packet;
+
+static janus_preallocated_queued_packet* prealloc_array = NULL;
+static guint prealloc_size = 0;
+static int num_threads = 0;
+
+void init_prealloc_array(int threads, guint size) {
+	if (prealloc_array != NULL) {
+		return;
+	}
+
+	prealloc_size = size;
+	num_threads = threads;
+	prealloc_array = g_malloc0(sizeof(janus_preallocated_queued_packet) * prealloc_size * threads);
+}
+
 static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 	if(pkt == NULL || pkt == &janus_ice_start_gathering ||
 			pkt == &janus_ice_add_candidates ||
@@ -666,6 +686,19 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 			pkt == &janus_ice_data_ready) {
 		return;
 	}
+
+	if (
+		prealloc_array != NULL
+		&& prealloc_array <= pkt
+		&& pkt < prealloc_array + prealloc_size
+	) {
+		janus_preallocated_queued_packet *prealloc_pkt = (janus_preallocated_queued_packet *)pkt;
+		prealloc_pkt->in_use = FALSE;
+		g_free(pkt->label);
+		g_free(pkt->protocol);
+		return;
+	}
+
 	g_free(pkt->data);
 	g_free(pkt->label);
 	g_free(pkt->protocol);
@@ -5020,6 +5053,49 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	} else {
 		janus_ice_free_queued_packet(pkt);
 	}
+}
+
+janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
+	if (1 <= helper_id <= num_threads) {
+		janus_preallocated_queued_packet *base = prealloc_array + (helper_id - 1) * prealloc;
+		for (janus_preallocated_queued_packet *prepkt = base; prepkt < base + prealloc_size; prepkt++) {
+			if (!prepkt->in_use) {
+				prepkt->in_use = TRUE;
+				janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
+				if (prepkt->size < length + SRTP_MAX_TAG_LEN) {
+					pkt->data = g_realloc(pkt.data, length + SRTP_MAX_TAG_LEN);
+					prepkt->size = length + SRTP_MAX_TAG_LEN;
+				}
+				return pkt;
+			}
+		}
+	}
+
+	janus_ice_queued_packet *pkt = g_malloc(sizeof(janus_ice_queued_packet));
+	pkt->mindex = packet->mindex;
+	pkt->data = g_malloc(length + SRTP_MAX_TAG_LEN);
+	return pkt;
+}
+
+void janus_ice_streaming_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet, guint hid) {
+	if(!handle || !handle->pc || handle->queued_packets == NULL || packet == NULL || packet->buffer == NULL ||
+			!janus_is_rtp(packet->buffer, packet->length))
+		return;
+
+	/* Queue this packet as it is (we'll prune/update/set extensions later) */
+	janus_ice_queued_packet *pkt = malloc_queued_packet(packet->length, hid);
+	pkt->mindex = packet->mindex;
+	memcpy(pkt->data, packet->buffer, packet->length);
+	pkt->length = packet->length;
+	pkt->type = packet->video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
+	pkt->extensions = packet->extensions;
+	pkt->control = FALSE;
+	pkt->encrypted = FALSE;
+	pkt->retransmission = FALSE;
+	pkt->label = NULL;
+	pkt->protocol = NULL;
+	pkt->added = janus_get_monotonic_time();
+	janus_ice_queue_packet(handle, pkt);
 }
 
 void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet) {
