@@ -4183,7 +4183,7 @@ static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_p
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
 	if(packet->length < totlen) {
 		if (is_preallocated_packet(packet)) {
-			janus_preallocated_queued_packet *prepkt = (janus_ice_queued_packet*)packet;
+			janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)packet;
 			if (prepkt->length < totlen + SRTP_MAX_TAG_LEN) {
 				packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
 				prepkt->length = totlen + SRTP_MAX_TAG_LEN;
