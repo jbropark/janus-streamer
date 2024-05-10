@@ -666,7 +666,7 @@ typedef struct janus_preallocated_queued_packet {
 static janus_preallocated_queued_packet* prealloc_start = NULL;
 static janus_preallocated_queued_packet* prealloc_end = NULL;
 static guint prealloc_size = 0;
-static int prealloc_threads = 0;
+static guint prealloc_threads = 0;
 static janus_mutex prealloc_mutex;
 
 void init_prealloc(int threads, guint size) {
