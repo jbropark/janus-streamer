@@ -5096,7 +5096,7 @@ static janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_i
 		GAsyncQueue *queue = prealloc_queues[helper_id - 1];
 		g_async_queue_lock(queue);
 		if (g_async_queue_length(queue) > 0) {
-			janus_preallocated_queued_packet *prepkt = g_async_queue_pop_unlock(queue);
+			janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)g_async_queue_pop_unlocked(queue);
 			janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
 
 			if (prepkt->length < length + SRTP_MAX_TAG_LEN) {
