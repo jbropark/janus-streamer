@@ -676,8 +676,16 @@ void init_prealloc(int threads, guint size) {
 
 	prealloc_threads = threads;
 	prealloc_size = size;
-	prealloc_start = g_malloc0(sizeof(janus_preallocated_queued_packet) * prealloc_size * prealloc_threads);
+	prealloc_start = g_malloc(sizeof(janus_preallocated_queued_packet) * prealloc_size * prealloc_threads);
 	prealloc_end = prealloc_start + prealloc_size * prealloc_threads;
+
+	for (janus_preallocated_queued_packet *prepkt = prealloc_start; prepkt < prealloc_end; prepkt++) {
+		janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
+		pkt->data = NULL;
+		prepkt->length = 0;
+		prepkt->in_use = FALSE;
+	}
+
 	janus_mutex_init(&prealloc_mutex);
 }
 
@@ -699,9 +707,9 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 	) {
 		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet *)pkt;
 		janus_mutex_lock(&prealloc_mutex);
-		prepkt->in_use = FALSE;
 		g_free(pkt->label);
 		g_free(pkt->protocol);
+		prepkt->in_use = FALSE;
 		janus_mutex_unlock(&prealloc_mutex);
 		return;
 	}
@@ -5069,12 +5077,18 @@ janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
 		janus_mutex_lock(&prealloc_mutex);
 		for (janus_preallocated_queued_packet *prepkt = base; prepkt < base + prealloc_size; prepkt++) {
 			if (!prepkt->in_use) {
-				prepkt->in_use = TRUE;
 				janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
 				if (prepkt->length < length + SRTP_MAX_TAG_LEN) {
-					pkt->data = g_realloc(pkt.data, length + SRTP_MAX_TAG_LEN);
+					char *new_data = g_realloc(pkt->data, length + SRTP_MAX_TAG_LEN);
+					if (new_data == NULL) {
+						break;
+					}
+
+					pkt->data = new_data;
 					prepkt->length = length + SRTP_MAX_TAG_LEN;
 				}
+
+				prepkt->in_use = TRUE;
 				janus_mutex_unlock(&prealloc_mutex);
 				return pkt;
 			}
