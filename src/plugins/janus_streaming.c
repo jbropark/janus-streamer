@@ -927,7 +927,6 @@ multistream-test: {
 #include "../utils.h"
 #include "../sdp-utils.h"
 #include "../ip-utils.h"
-#include "../ice.h"
 
 /* Default settings */
 #define JANUS_STREAMING_DEFAULT_SESSION_TIMEOUT 0 /* Overwrite the RTSP session timeout. If set to zero, the RTSP timeout is derived from a session. */
@@ -7790,8 +7789,6 @@ janus_streaming_mountpoint *janus_streaming_create_rtp_source(
 			janus_refcount_increase(&helper->ref);
 			live_rtp->threads = g_list_append(live_rtp->threads, helper);
 		}
-
-		init_prealloc_array(threads, 100);
 	}
 	janus_mutex_unlock(&mountpoints_mutex);
 	/* Finally, create the mountpoint thread itself */
@@ -10483,7 +10480,7 @@ static void *janus_streaming_helper_thread(void *data) {
 		if(pkt == &exit_packet)
 			break;
 
-		pkt.helper_id = helper->id;
+		pkt->helper_id = helper->id;
 		janus_mutex_lock(&helper->mutex);
 		g_list_foreach(helper->viewers,
 			pkt->is_rtp || pkt->is_data ? janus_streaming_relay_rtp_packet : janus_streaming_relay_rtcp_packet,

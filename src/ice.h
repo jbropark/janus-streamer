@@ -48,7 +48,7 @@ void janus_ice_init(gboolean ice_lite, gboolean ice_tcp, gboolean full_trickle, 
 	gboolean ipv6, gboolean ipv6_linklocal, uint16_t rtp_min_port, uint16_t rtp_max_port);
 /*! \brief ICE stuff de-initialization */
 void janus_ice_deinit(void);
-void init_prealloc_array(int threads, guint size);
+void init_prealloc(int threads, guint size);
 /*! \brief Method to check whether a STUN server is reachable
  * @param[in] addr Address of the STUN server as a janus_network_address instance
  * @param[in] port Port of the STUN server
