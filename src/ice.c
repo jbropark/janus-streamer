@@ -689,6 +689,14 @@ void init_prealloc(int threads, guint size) {
 	janus_mutex_init(&prealloc_mutex);
 }
 
+static int is_preallocated_packet(janus_ice_queued_packet *pkt) {
+	return (
+		prealloc_start != NULL
+		&& prealloc_start <= (janus_preallocated_queued_packet*)pkt
+		&& (janus_preallocated_queued_packet*)pkt < prealloc_end
+	);
+}
+
 static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 	if(pkt == NULL || pkt == &janus_ice_start_gathering ||
 			pkt == &janus_ice_add_candidates ||
@@ -700,11 +708,7 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 		return;
 	}
 
-	if (
-		prealloc_start != NULL
-		&& prealloc_start <= (janus_preallocated_queued_packet*)pkt
-		&& (janus_preallocated_queued_packet*)pkt < prealloc_end
-	) {
+	if (is_preallocated_packet(pkt)){
 		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet *)pkt;
 		janus_mutex_lock(&prealloc_mutex);
 		g_free(pkt->label);
@@ -4177,8 +4181,17 @@ static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_p
 	}
 	/* Check if we need to resize this packet buffer first */
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
-	if(packet->length < totlen)
-		packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
+	if(packet->length < totlen) {
+		if (is_preallocated_packet(packet)) {
+			janus_preallocated_queued_packet *prepkt = (janus_ice_queued_packet*)packet;
+			if (prepkt->length < totlen + SRTP_MAX_TAG_LEN) {
+				packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
+				prepkt->length = totlen + SRTP_MAX_TAG_LEN;
+			}
+		} else {
+			packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
+		}
+	}
 	/* Now check if we need to move the payload */
 	payload = payload_start ? (packet->data + payload_start) : NULL;
 	if(payload != NULL && plen > 0 && packet->length != totlen)
