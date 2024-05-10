@@ -702,8 +702,8 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 
 	if (
 		prealloc_start != NULL
-		&& (void*)prealloc_start <= pkt
-		&& pkt < (void*)prealloc_end
+		&& prealloc_start <= (janus_preallocated_queued_packet*)pkt
+		&& (janus_preallocated_queued_packet*)pkt < prealloc_end
 	) {
 		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet *)pkt;
 		janus_mutex_lock(&prealloc_mutex);
@@ -5070,8 +5070,8 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	}
 }
 
-janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
-	if (1 <= helper_id <= prealloc_threads) {
+static janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
+	if (1 <= helper_id && helper_id <= prealloc_threads) {
 		janus_preallocated_queued_packet *base = prealloc_start + (helper_id - 1) * prealloc_size;
 
 		janus_mutex_lock(&prealloc_mutex);
