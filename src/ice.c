@@ -689,11 +689,13 @@ void init_prealloc(int threads, guint size) {
 	for (guint idx = 0; idx < prealloc_threads; idx++) {
 		GAsyncQueue *queue = g_async_queue_new();
 		prealloc_queues[idx] = queue;
+		g_async_queue_lock(queue);
 		janus_preallocated_queued_packet *base = prealloc_start + idx * prealloc_size;
 		for (janus_preallocated_queued_packet *prepkt = base; prepkt < base + prealloc_size; prepkt++) {
 			prepkt->helper_id = idx;
-			g_async_queue_push(queue, prepkt);
+			g_async_queue_push_unlocked(queue, prepkt);
 		}
+		g_async_queue_unlock(queue);
 	}
 }
 
@@ -721,8 +723,7 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 		GAsyncQueue *queue = prealloc_queues[prepkt->helper_id];
 		g_free(pkt->label);
 		g_free(pkt->protocol);
-		g_async_queue_lock(queue);
-		g_async_queue_push_unlocked(queue, prepkt);
+		g_async_queue_push(queue, prepkt);
 		return;
 	}
 
@@ -5094,9 +5095,8 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 static janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
 	if (1 <= helper_id && helper_id <= prealloc_threads) {
 		GAsyncQueue *queue = prealloc_queues[helper_id - 1];
-		g_async_queue_lock(queue);
-		if (g_async_queue_length(queue) > 0) {
-			janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)g_async_queue_pop_unlocked(queue);
+		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)g_async_queue_try_pop(queue);
+		if (prepkt != NULL) {
 			janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
 
 			if (prepkt->length < length + SRTP_MAX_TAG_LEN) {
@@ -5106,8 +5106,6 @@ static janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_i
 
 			return pkt;
 		}
-
-		g_async_queue_unlock(queue);
 	}
 
 	janus_ice_queued_packet *pkt = g_malloc(sizeof(janus_ice_queued_packet));
