@@ -4504,6 +4504,7 @@ static gboolean janus_ice_outgoing_stats_handle(gpointer user_data) {
 
 static void janus_ice_outgoing_traffic_handle_rtcp(janus_ice_handle *handle, janus_ice_queued_packet *pkt, janus_ice_peerconnection_medium *medium) {
 	/* RTCP */
+	janus_session *session = (janus_session *)handle->session;
 	janus_ice_peerconnection *pc = handle->pc;
 	int video = (pkt->type == JANUS_ICE_PACKET_VIDEO);
 	pc->noerrorlog = FALSE;
@@ -4514,7 +4515,7 @@ static void janus_ice_outgoing_traffic_handle_rtcp(janus_ice_handle *handle, jan
 			medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
 		}
 		janus_ice_free_queued_packet(pkt);
-		return G_SOURCE_CONTINUE;
+		return;
 	}
 	medium->noerrorlog = FALSE;
 	if(pkt->encrypted) {
@@ -4579,13 +4580,14 @@ static void janus_ice_outgoing_traffic_handle_rtcp(janus_ice_handle *handle, jan
 
 static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janus_ice_queued_packet *pkt, janus_ice_peerconnection_medium *medium) {
 	/* RTP or data */
+	janus_session *session = (janus_session *)handle->session;
 	janus_ice_peerconnection *pc = handle->pc;
 	if(pkt->type == JANUS_ICE_PACKET_AUDIO || pkt->type == JANUS_ICE_PACKET_VIDEO) {
 		/* RTP */
 		int video = (pkt->type == JANUS_ICE_PACKET_VIDEO);
 		if(!medium->send) {
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 		if(janus_is_webrtc_encryption_enabled() && (!pc->dtls || !pc->dtls->srtp_valid || !pc->dtls->srtp_out)) {
 			if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT) && !medium->noerrorlog) {
@@ -4594,7 +4596,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 				medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
 			}
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 		medium->noerrorlog = FALSE;
 		if(pkt->encrypted) {
@@ -4675,7 +4677,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 					JANUS_LOG(LOG_WARN, "[%"SCNu64"] Discarding outgoing empty RTP packet\n", handle->handle_id);
 					janus_ice_free_rtp_packet(p);
 					janus_ice_free_queued_packet(pkt);
-					return G_SOURCE_CONTINUE;
+					return;
 				}
 				size_t hsize = payload - pkt->data;
 				/* Copy the header first */
@@ -4755,7 +4757,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 					if(!medium->do_nacks) {
 						/* ... unless NACKs are disabled for this medium */
 						janus_ice_free_queued_packet(pkt);
-						return G_SOURCE_CONTINUE;
+						return;
 					}
 					if(p == NULL) {
 						/* If we're not doing RFC4588, we're saving the SRTP packet as it is */
@@ -4785,7 +4787,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 		/* Data */
 		if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_DATA_CHANNELS)) {
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 #ifdef HAVE_SCTP
 		if(!pc->dtls) {
@@ -4794,7 +4796,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 				medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
 			}
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 		medium->noerrorlog = FALSE;
 		/* TODO Support binary data */
@@ -4805,7 +4807,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 		/* SCTP data to push */
 		if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_DATA_CHANNELS)) {
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 #ifdef HAVE_SCTP
 		/* Encapsulate this data in DTLS and send it */
@@ -4815,7 +4817,7 @@ static void janus_ice_outgoing_traffic_handle_rtp(janus_ice_handle *handle, janu
 				medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
 			}
 			janus_ice_free_queued_packet(pkt);
-			return G_SOURCE_CONTINUE;
+			return;
 		}
 		medium->noerrorlog = FALSE;
 		janus_dtls_send_sctp_data(pc->dtls, pkt->data, pkt->length);
