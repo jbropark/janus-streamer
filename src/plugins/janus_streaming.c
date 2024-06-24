@@ -9132,6 +9132,7 @@ static void *janus_streaming_ondemand_thread(void *data) {
 		packet.ptype = packet.data->type;
 		packet.timestamp = ntohl(packet.data->timestamp);
 		packet.seq_number = ntohs(packet.data->seq_number);
+		packet.helper_id = 0;
 		/* Go! */
 		janus_streaming_relay_rtp_packet(session, &packet);
 		/* Update header */
@@ -9283,6 +9284,7 @@ static void *janus_streaming_filesource_thread(void *data) {
 		packet.ptype = packet.data->type;
 		packet.timestamp = ntohl(packet.data->timestamp);
 		packet.seq_number = ntohs(packet.data->seq_number);
+		packet.helper_id = 0;
 		/* Go! */
 		janus_mutex_lock_nodebug(&mountpoint->mutex);
 		g_list_foreach(mountpoint->viewers, janus_streaming_relay_rtp_packet, &packet);
@@ -9667,6 +9669,7 @@ static void *janus_streaming_relay_thread(void *data) {
 						packet.ptype = packet.data->type;
 						packet.timestamp = ntohl(packet.data->timestamp);
 						packet.seq_number = ntohs(packet.data->seq_number);
+						packet.helper_id = 0;
 						/* Go! */
 						janus_mutex_lock(&mountpoint->mutex);
 						g_list_foreach(mountpoint->helper_threads == 0 ? mountpoint->viewers : mountpoint->threads,
@@ -9883,6 +9886,7 @@ static void *janus_streaming_relay_thread(void *data) {
 							spspkt.ptype = spspkt.data->type;
 							spspkt.timestamp = ntohl(spspkt.data->timestamp);
 							spspkt.seq_number = ntohs(spspkt.data->seq_number);
+							spspkt.helper_id = 0;
 							janus_mutex_lock(&mountpoint->mutex);
 							JANUS_LOG(LOG_HUGE, "[%s] Sending SPS/PPS (seq=%"SCNu16", ts=%"SCNu32")\n", name,
 								ntohs(spspkt.data->seq_number), ntohl(spspkt.data->timestamp));
@@ -9908,6 +9912,7 @@ static void *janus_streaming_relay_thread(void *data) {
 							packet.ssrc[1] = stream->last_ssrc[1];
 							packet.ssrc[2] = stream->last_ssrc[2];
 						}
+						packet.helper_id = 0;
 						/* Go! */
 						janus_mutex_lock(&mountpoint->mutex);
 						g_list_foreach(mountpoint->helper_threads == 0 ? mountpoint->viewers : mountpoint->threads,
@@ -9958,6 +9963,7 @@ static void *janus_streaming_relay_thread(void *data) {
 							pkt->length = bytes;
 							janus_mutex_unlock(&stream->buffermsg_mutex);
 						}
+						packet.helper_id = 0;
 						/* Go! */
 						janus_mutex_lock(&mountpoint->mutex);
 						g_list_foreach(mountpoint->helper_threads == 0 ? mountpoint->viewers : mountpoint->threads,
