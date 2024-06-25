@@ -833,6 +833,7 @@ void janus_session_notify_event(janus_session *session, json_t *event) {
 gint janus_session_destroy(janus_session *session) {
 	guint64 session_id = session->session_id;
 	JANUS_LOG(LOG_INFO, "Destroying session %"SCNu64"; %p\n", session_id, session);
+	return 0;
 	if(!g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
 		return 0;
 	janus_session_handles_clear(session);
@@ -5220,7 +5221,7 @@ gint main(int argc, char *argv[]) {
 			task_pool_size = -1;
 	}
 
-	init_prealloc(50, 200);
+	init_prealloc(40, 100000);
 
 	/* Initialize the ICE stack now */
 	janus_ice_init(ice_lite, ice_tcp, full_trickle, ignore_mdns, ipv6, ipv6_linklocal, rtp_min_port, rtp_max_port);

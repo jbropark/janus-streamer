@@ -535,20 +535,35 @@ typedef struct janus_ice_outgoing_traffic {
 	GSource parent;
 	janus_ice_handle *handle;
 	GDestroyNotify destroy;
+	unsigned long count;
+	unsigned long retrans;
+	unsigned long drop;
+	unsigned long latency;
+	char is_log;
+	int ql;
+	unsigned long sent_sum;
 } janus_ice_outgoing_traffic;
 static gboolean janus_ice_outgoing_rtcp_handle(gpointer user_data);
 static gboolean janus_ice_outgoing_stats_handle(gpointer user_data);
-static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janus_ice_queued_packet *pkt);
+static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janus_ice_queued_packet *pkt, janus_ice_outgoing_traffic *t);
 static gboolean janus_ice_outgoing_traffic_prepare(GSource *source, gint *timeout) {
 	janus_ice_outgoing_traffic *t = (janus_ice_outgoing_traffic *)source;
-	return (g_async_queue_length(t->handle->queued_packets) > 0);
+	int length = g_async_queue_length(t->handle->queued_packets);
+	return (length > 0);
 }
 static gboolean janus_ice_outgoing_traffic_dispatch(GSource *source, GSourceFunc callback, gpointer user_data) {
 	janus_ice_outgoing_traffic *t = (janus_ice_outgoing_traffic *)source;
 	int ret = G_SOURCE_CONTINUE;
+	int length = g_async_queue_length(t->handle->queued_packets);
+	if (length > 100 && t->count > 0) {
+	  JANUS_LOG(LOG_ERR, "Handle %d packets, lat: %ld, retrans: %.4lf (%lu), drop: %.4lf (%lu), total: %lu\n", length, t->latency, (double)t->retrans / t->count, t->retrans, (double)t->drop / t->count, t->drop, t->count);
+	}
+	t->is_log = 1;
+	t->ql = length;
+	t->sent_sum = 0;
 	janus_ice_queued_packet *pkt = NULL;
 	while((pkt = g_async_queue_try_pop(t->handle->queued_packets)) != NULL) {
-		if(janus_ice_outgoing_traffic_handle(t->handle, pkt) == G_SOURCE_REMOVE)
+		if(janus_ice_outgoing_traffic_handle(t->handle, pkt, t) == G_SOURCE_REMOVE)
 			ret = G_SOURCE_REMOVE;
 	}
 	return ret;
@@ -582,6 +597,10 @@ static GSource *janus_ice_outgoing_traffic_create(janus_ice_handle *handle, GDes
 	janus_refcount_increase(&handle->ref);
 	t->handle = handle;
 	t->destroy = destroy;
+	t->count = 0ul;
+	t->retrans = 0ul;
+	t->drop = 0ul;
+	t->latency = 0ul;
 	return source;
 }
 
@@ -2138,8 +2157,8 @@ static gboolean janus_ice_check_failed(gpointer data) {
 	}
 	if(!do_wait || (handle && trickle_recv && answer_recv && !alert_set)) {
 		/* FIXME Should we really give up for what may be a failure in only one of the media? */
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] ICE failed for component %d in stream %d...\n",
-			handle->handle_id, pc->component_id, pc->stream_id);
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] ICE failed for component %d in stream %d... (td=%ld)\n",
+			handle->handle_id, pc->component_id, pc->stream_id, janus_get_monotonic_time() - pc->icefailed_detected);
 		janus_ice_webrtc_hangup(handle, "ICE failed");
 		goto stoptimer;
 	}
@@ -4572,10 +4591,12 @@ static gboolean janus_ice_outgoing_stats_handle(gpointer user_data) {
 	return G_SOURCE_CONTINUE;
 }
 
-static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janus_ice_queued_packet *pkt) {
+static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janus_ice_queued_packet *pkt, janus_ice_outgoing_traffic *traffic) {
 	janus_session *session = (janus_session *)handle->session;
 	janus_ice_peerconnection *pc = handle->pc;
 	janus_ice_peerconnection_medium *medium = NULL;
+	traffic->count++;
+	if (pkt->retransmission) traffic->retrans++;
 	if(pkt == &janus_ice_start_gathering) {
 		/* Start gathering candidates */
 		if(handle->agent == NULL) {
@@ -4734,9 +4755,11 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 		return G_SOURCE_CONTINUE;
 	}
 	gint64 age = (janus_get_monotonic_time() - pkt->added);
+	traffic->latency = (traffic->latency * 99 + age) / 100;
 	if(age > G_USEC_PER_SEC) {
 		JANUS_LOG(LOG_WARN, "[%"SCNu64"] Discarding too old outgoing packet (age=%"SCNi64"us)\n", handle->handle_id, age);
 		janus_ice_free_queued_packet(pkt);
+		traffic->drop++;
 		return G_SOURCE_CONTINUE;
 	}
 	if(!pc->cdone) {
@@ -4958,8 +4981,10 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				} else {
 					/* Shoot! */
 					int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);
-					if(sent < protected) {
-						JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d)\n", handle->handle_id, sent, protected);
+					if(sent > 0) traffic->sent_sum += sent;
+					if(sent < protected && traffic->is_log) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d) (ql: %d, ss: %lu): %d\n", handle->handle_id, sent, protected, traffic->ql, traffic->sent_sum, errno);
+						traffic->is_log = 0;
 					}
 					/* Update stats */
 					if(sent > 0) {

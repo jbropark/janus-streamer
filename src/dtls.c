@@ -1111,9 +1111,8 @@ gboolean janus_dtls_retry(gpointer stack) {
 		goto stoptimer;
 	}
 	if(janus_get_monotonic_time() - dtls->dtls_started >= 20*G_USEC_PER_SEC) {
-		/* FIXME Should we really give up after 20 seconds waiting for DTLS? */
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] DTLS taking too much time for component %d in stream %d...\n",
-			handle->handle_id, pc->component_id, pc->stream_id);
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] DTLS taking too much time for component %d in stream %d... (td=%ld)\n",
+			handle->handle_id, pc->component_id, pc->stream_id, janus_get_monotonic_time() - dtls->dtls_started);
 		janus_ice_webrtc_hangup(handle, "DTLS timeout");
 		goto stoptimer;
 	}
@@ -1131,12 +1130,15 @@ gboolean janus_dtls_retry(gpointer stack) {
 		janus_dtls_notify_state_change(dtls);
 		/* Retransmit the packet */
 		int res = DTLSv1_handle_timeout(dtls->ssl);
-		if(res == -1 && SSL_get_error(dtls->ssl, res) != SSL_ERROR_WANT_WRITE) {
+		if(res == -1) {
+			int ssl_error = SSL_get_error(dtls->ssl, res);
+			if (ssl_error != SSL_ERROR_WANT_WRITE) {
 			/* DTLSv1_handle_timeout returned an unrecoverable error, fail right away
 			 * Ref.: https://webrtc-review.googlesource.com/c/src/+/260100 */
-			JANUS_LOG(LOG_ERR, "[%"SCNu64"] DTLSv1_handle_timeout failed...\n", handle->handle_id);
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] DTLSv1_handle_timeout failed... (error: %d)\n", handle->handle_id, ssl_error);
 			janus_ice_webrtc_hangup(handle, "DTLS error");
 			goto stoptimer;
+			}
 		}
 	}
 	return TRUE;
