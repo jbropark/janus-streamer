@@ -912,7 +912,7 @@ multistream-test: {
 #endif
 #endif
 
-#define MTU 9000
+#define MTU 1500
 
 #ifdef HAVE_LIBOGG
 #include <ogg/ogg.h>
