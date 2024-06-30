@@ -4222,7 +4222,7 @@ void janus_plugin_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_r
 	janus_ice_relay_rtp(handle, packet);
 }
 
-void janus_plugin_streaming_relay_rtps(janus_plugin_session *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
+void janus_plugin_streaming_relay_rtps(janus_plugin_session *plugin_session, janus_plugin_streaming_rtp *packets, int num_packets) {
 	if((plugin_session < (janus_plugin_session *)0x1000) || g_atomic_int_get(&plugin_session->stopped) ||
 			packets == NULL || num_packets < 1)
 		return;

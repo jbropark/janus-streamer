@@ -5022,7 +5022,7 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	}
 }
 
-static void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
+void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
 	if (!handle || !handle->pc)
 		return;
 

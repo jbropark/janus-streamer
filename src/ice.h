@@ -712,6 +712,7 @@ void janus_ice_peerconnection_destroy(janus_ice_peerconnection *pc);
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] packet The RTP packet to send */
 void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet);
+void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets);
 /*! \brief Core RTCP callback, called when a plugin has an RTCP message to send to a peer
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] packet The RTCP message to send */
