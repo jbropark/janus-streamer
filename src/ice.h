@@ -48,7 +48,6 @@ void janus_ice_init(gboolean ice_lite, gboolean ice_tcp, gboolean full_trickle, 
 	gboolean ipv6, gboolean ipv6_linklocal, uint16_t rtp_min_port, uint16_t rtp_max_port);
 /*! \brief ICE stuff de-initialization */
 void janus_ice_deinit(void);
-void init_prealloc(int threads, guint size);
 /*! \brief Method to check whether a STUN server is reachable
  * @param[in] addr Address of the STUN server as a janus_network_address instance
  * @param[in] port Port of the STUN server
@@ -713,7 +712,6 @@ void janus_ice_peerconnection_destroy(janus_ice_peerconnection *pc);
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] packet The RTP packet to send */
 void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet);
-void janus_ice_streaming_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet, guint hid);
 /*! \brief Core RTCP callback, called when a plugin has an RTCP message to send to a peer
  * @param[in] handle The Janus ICE handle associated with the peer
  * @param[in] packet The RTCP message to send */

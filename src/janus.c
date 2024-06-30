@@ -607,7 +607,7 @@ void janus_transport_task(gpointer data, gpointer user_data);
 int janus_plugin_push_event(janus_plugin_session *plugin_session, janus_plugin *plugin, const char *transaction, json_t *message, json_t *jsep);
 json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plugin *plugin, const char *sdp_type, const char *sdp, gboolean restart);
 void janus_plugin_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_rtp *packet);
-void janus_plugin_streaming_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_rtp *packet, guint helper_id);
+void janus_plugin_streaming_relay_rtps(janus_plugin_session *handle, janus_plugin_streaming_rtp *packets, int num_packets);
 void janus_plugin_relay_rtcp(janus_plugin_session *plugin_session, janus_plugin_rtcp *packet);
 void janus_plugin_relay_data(janus_plugin_session *plugin_session, janus_plugin_data *message);
 void janus_plugin_send_pli(janus_plugin_session *plugin_session);
@@ -623,7 +623,7 @@ static janus_callbacks janus_handler_plugin =
 	{
 		.push_event = janus_plugin_push_event,
 		.relay_rtp = janus_plugin_relay_rtp,
-		.relay_streaming_rtp = janus_plugin_streaming_relay_rtp,
+		.relay_streaming_rtps = janus_plugin_streaming_relay_rtps,
 		.relay_rtcp = janus_plugin_relay_rtcp,
 		.relay_data = janus_plugin_relay_data,
 		.send_pli = janus_plugin_send_pli,
@@ -4222,15 +4222,15 @@ void janus_plugin_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_r
 	janus_ice_relay_rtp(handle, packet);
 }
 
-void janus_plugin_streaming_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_rtp *packet, guint helper_id) {
+void janus_plugin_streaming_relay_rtps(janus_plugin_session *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
 	if((plugin_session < (janus_plugin_session *)0x1000) || g_atomic_int_get(&plugin_session->stopped) ||
-			packet == NULL || packet->buffer == NULL || packet->length < 1)
+			packets == NULL || num_packets < 1)
 		return;
 	janus_ice_handle *handle = (janus_ice_handle *)plugin_session->gateway_handle;
 	if(!handle || janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_STOP)
 			|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT))
 		return;
-	janus_ice_streaming_relay_rtp(handle, packet, helper_id);
+	janus_ice_streaming_relay_rtps(handle, packets, num_packets);
 }
 
 void janus_plugin_relay_rtcp(janus_plugin_session *plugin_session, janus_plugin_rtcp *packet) {
@@ -5219,9 +5219,6 @@ gint main(int argc, char *argv[]) {
 		if(task_pool_size <= 0)
 			task_pool_size = -1;
 	}
-
-	init_prealloc(50, 200);
-
 	/* Initialize the ICE stack now */
 	janus_ice_init(ice_lite, ice_tcp, full_trickle, ignore_mdns, ipv6, ipv6_linklocal, rtp_min_port, rtp_max_port);
 	if(janus_ice_set_stun_server(stun_server, stun_port) < 0) {

@@ -656,57 +656,6 @@ static inline void janus_ice_free_rtp_packet(janus_rtp_packet *pkt) {
 	g_free(pkt);
 }
 
-typedef struct janus_preallocated_queued_packet {
-	janus_ice_queued_packet pkt;
-	guint helper_id;
-	gint length;
-} janus_preallocated_queued_packet;
-
-/* prealloc */
-static janus_preallocated_queued_packet* prealloc_start = NULL;
-static janus_preallocated_queued_packet* prealloc_end = NULL;
-static guint prealloc_size = 0;
-static guint prealloc_threads = 0;
-static GAsyncQueue **prealloc_queues = NULL;
-
-void init_prealloc(int threads, guint size) {
-	if (prealloc_start != NULL) {
-		return;
-	}
-
-	prealloc_threads = threads;
-	prealloc_size = size;
-	prealloc_start = g_malloc(sizeof(janus_preallocated_queued_packet) * prealloc_size * prealloc_threads);
-	prealloc_end = prealloc_start + prealloc_size * prealloc_threads;
-
-	for (janus_preallocated_queued_packet *prepkt = prealloc_start; prepkt < prealloc_end; prepkt++) {
-		janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
-		pkt->data = NULL;
-		prepkt->length = 0;
-	}
-
-	prealloc_queues = g_malloc(sizeof(GAsyncQueue*) * prealloc_threads);
-	for (guint idx = 0; idx < prealloc_threads; idx++) {
-		GAsyncQueue *queue = g_async_queue_new();
-		prealloc_queues[idx] = queue;
-		g_async_queue_lock(queue);
-		janus_preallocated_queued_packet *base = prealloc_start + idx * prealloc_size;
-		for (janus_preallocated_queued_packet *prepkt = base; prepkt < base + prealloc_size; prepkt++) {
-			prepkt->helper_id = idx;
-			g_async_queue_push_unlocked(queue, prepkt);
-		}
-		g_async_queue_unlock(queue);
-	}
-}
-
-static int is_preallocated_packet(janus_ice_queued_packet *pkt) {
-	return (
-		prealloc_start != NULL
-		&& prealloc_start <= (janus_preallocated_queued_packet*)pkt
-		&& (janus_preallocated_queued_packet*)pkt < prealloc_end
-	);
-}
-
 static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 	if(pkt == NULL || pkt == &janus_ice_start_gathering ||
 			pkt == &janus_ice_add_candidates ||
@@ -717,16 +666,6 @@ static void janus_ice_free_queued_packet(janus_ice_queued_packet *pkt) {
 			pkt == &janus_ice_data_ready) {
 		return;
 	}
-
-	if (is_preallocated_packet(pkt)){
-		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet *)pkt;
-		GAsyncQueue *queue = prealloc_queues[prepkt->helper_id];
-		g_free(pkt->label);
-		g_free(pkt->protocol);
-		g_async_queue_push(queue, prepkt);
-		return;
-	}
-
 	g_free(pkt->data);
 	g_free(pkt->label);
 	g_free(pkt->protocol);
@@ -4190,17 +4129,8 @@ static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_p
 	}
 	/* Check if we need to resize this packet buffer first */
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
-	if(packet->length < totlen) {
-		if (is_preallocated_packet(packet)) {
-			janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)packet;
-			if (prepkt->length < totlen + SRTP_MAX_TAG_LEN) {
-				packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
-				prepkt->length = totlen + SRTP_MAX_TAG_LEN;
-			}
-		} else {
-			packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
-		}
-	}
+	if(packet->length < totlen)
+		packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
 	/* Now check if we need to move the payload */
 	payload = payload_start ? (packet->data + payload_start) : NULL;
 	if(payload != NULL && plen > 0 && packet->length != totlen)
@@ -5092,46 +5022,424 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	}
 }
 
-static janus_ice_queued_packet* malloc_queued_packet(gint length, guint helper_id) {
-	if (1 <= helper_id && helper_id <= prealloc_threads) {
-		GAsyncQueue *queue = prealloc_queues[helper_id - 1];
-		janus_preallocated_queued_packet *prepkt = (janus_preallocated_queued_packet*)g_async_queue_try_pop(queue);
-		if (prepkt != NULL) {
-			janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
-
-			if (prepkt->length < length + SRTP_MAX_TAG_LEN) {
-				pkt->data= g_realloc(pkt->data, length + SRTP_MAX_TAG_LEN);
-				prepkt->length = length + SRTP_MAX_TAG_LEN;
-			}
-
-			return pkt;
-		}
+static gboolean janus_ice_streaming_handle(janus_ice_handle *handle, janus_ice_queued_packet *pkts, int length) {
+	janus_session *session = (janus_session *)handle->session;
+	janus_ice_peerconnection *pc = handle->pc;
+	janus_ice_peerconnection_medium *medium = NULL;
+	if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY)) {
+		return G_SOURCE_CONTINUE;
+	}
+	if (legnth == 0) {
+		return G_SOURCE_CONTINUE;
+	}
+	if (pc == 0 || !pc->cdone) {
+		return G_SOURCE_CONTINUE;
+	}
+	/* Find the right medium instance */
+	if(pkt->mindex != -1) {
+		medium = g_hash_table_lookup(pc->media, GINT_TO_POINTER(pkt->mindex));
+	} else {
+		janus_media_type mtype = janus_media_type_from_packet(pkt->type);
+		medium = g_hash_table_lookup(pc->media_bytype, GINT_TO_POINTER(mtype));
+	}
+	if(medium == NULL) {
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] No medium #%d associated to this packet??\n", handle->handle_id, pkt->mindex);
+		return G_SOURCE_CONTINUE;
+	}
+	if (!medium->send) {
+		return G_SOURCE_CONTINUE;
 	}
 
-	janus_ice_queued_packet *pkt = g_malloc(sizeof(janus_ice_queued_packet));
-	pkt->data = g_malloc(length + SRTP_MAX_TAG_LEN);
-	return pkt;
+	/* RTP */
+	int video = (pkt->type == JANUS_ICE_PACKET_VIDEO);
+	if(janus_is_webrtc_encryption_enabled() && (!pc->dtls || !pc->dtls->srtp_valid || !pc->dtls->srtp_out)) {
+		if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT) && !medium->noerrorlog) {
+			JANUS_LOG(LOG_WARN, "[%"SCNu64"] %s stream component has no valid SRTP session (yet?)\n",
+				handle->handle_id, video ? "video" : "audio");
+			medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
+		}
+		return G_SOURCE_CONTINUE;
+	}
+	medium->noerrorlog = FALSE;
+
+	/* Prune/update/set RTP extensions */
+	janus_ice_rtp_extension_update(handle, medium, pkt);
+	/* Overwrite SSRC */
+	janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+	if(!pkt->retransmission) {
+		/* ... but only if this isn't a retransmission (for those we already set it before) */
+		header->ssrc = htonl(medium->ssrc);
+	}
+	/* Keep track of payload types too */
+	if(medium->payload_type < 0) {
+		medium->payload_type = header->type;
+		if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
+				medium->rtx_payload_types && g_hash_table_size(medium->rtx_payload_types) > 0) {
+			medium->rtx_payload_type = GPOINTER_TO_INT(g_hash_table_lookup(medium->rtx_payload_types, GINT_TO_POINTER(medium->payload_type)));
+			JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Retransmissions will have payload type %d\n",
+				handle->handle_id, medium->rtx_payload_type);
+		}
+		if(medium->codec == NULL) {
+			janus_mutex_lock(&handle->mutex);
+			const char *codec = janus_get_codec_from_pt(handle->local_sdp, medium->payload_type);
+			janus_mutex_unlock(&handle->mutex);
+			if(codec != NULL)
+				medium->codec = g_strdup(codec);
+		}
+		if(video && medium->video_is_keyframe == NULL && medium->codec != NULL) {
+			if(!strcasecmp(medium->codec, "vp8"))
+				medium->video_is_keyframe = &janus_vp8_is_keyframe;
+			else if(!strcasecmp(medium->codec, "vp9"))
+				medium->video_is_keyframe = &janus_vp9_is_keyframe;
+			else if(!strcasecmp(medium->codec, "h264"))
+				medium->video_is_keyframe = &janus_h264_is_keyframe;
+			else if(!strcasecmp(medium->codec, "av1"))
+				medium->video_is_keyframe = &janus_av1_is_keyframe;
+			else if(!strcasecmp(medium->codec, "h265"))
+				medium->video_is_keyframe = &janus_h265_is_keyframe;
+		}
+	}
+	/* Do we need to dump this packet for debugging? */
+	if(g_atomic_int_get(&handle->dump_packets))
+		janus_text2pcap_dump(handle->text2pcap, JANUS_TEXT2PCAP_RTP, FALSE, pkt->data, pkt->length,
+			"[session=%"SCNu64"][handle=%"SCNu64"]", session->session_id, handle->handle_id);
+	/* If this is video and NACK optimizations are enabled, check if this is
+		* a keyframe: if so, we empty our retransmit buffer for incoming NACKs */
+	if(video && nack_optimizations && medium->video_is_keyframe) {
+		int plen = 0;
+		char *payload = janus_rtp_payload(pkt->data, pkt->length, &plen);
+		if(medium->video_is_keyframe(payload, plen)) {
+			JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Keyframe sent, cleaning retransmit buffer\n", handle->handle_id);
+			janus_cleanup_nack_buffer(0, pc, FALSE, TRUE);
+		}
+	}
+	/* Before encrypting, check if we need to copy the unencrypted payload (e.g., for rtx/90000) */
+	janus_rtp_packet *p = NULL;
+	if(medium->nack_queue_ms > 0 
+	    && !pkt->retransmission
+		&& pkt->type == JANUS_ICE_PACKET_VIDEO
+		&& medium->do_nacks
+		&& janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
+		/* Save the packet for retransmissions that may be needed later: start by
+			* making room for two more bytes to store the original sequence number */
+		p = g_malloc(sizeof(janus_rtp_packet));
+		janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+		guint16 original_seq = header->seq_number;
+		p->data = g_malloc(pkt->length+2);
+		p->length = pkt->length+2;
+		/* Check where the payload starts */
+		int plen = 0;
+		char *payload = janus_rtp_payload(pkt->data, pkt->length, &plen);
+		if(plen == 0) {
+			JANUS_LOG(LOG_WARN, "[%"SCNu64"] Discarding outgoing empty RTP packet\n", handle->handle_id);
+			janus_ice_free_rtp_packet(p);
+			janus_ice_free_queued_packet(pkt);
+			return G_SOURCE_CONTINUE;
+		}
+		size_t hsize = payload - pkt->data;
+		/* Copy the header first */
+		memcpy(p->data, pkt->data, hsize);
+		/* Copy the original sequence number */
+		memcpy(p->data+hsize, &original_seq, 2);
+		/* Copy the extensions struct */
+		p->extensions = pkt->extensions;
+		/* Copy the payload */
+		memcpy(p->data+hsize+2, payload, pkt->length - hsize);
+	}
+	/* Encrypt SRTP */
+	int protected = pkt->length;
+	int res = janus_is_webrtc_encryption_enabled() ?
+		srtp_protect(pc->dtls->srtp_out, pkt->data, &protected) : srtp_err_status_ok;
+	if(res != srtp_err_status_ok) {
+		/* We don't spam the logs for every SRTP error: just take note of this, and print a summary later */
+		handle->srtp_errors_count++;
+		handle->last_srtp_error = res;
+		/* If we're debugging, though, print every occurrence */
+		janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+		guint32 timestamp = ntohl(header->timestamp);
+		guint16 seq = ntohs(header->seq_number);
+		JANUS_LOG(LOG_DBG, "[%"SCNu64"] ... SRTP protect error... %s (len=%d-->%d, ts=%"SCNu32", seq=%"SCNu16")...\n",
+			handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
+		janus_ice_free_rtp_packet(p);
+	} else {
+		/* Shoot! */
+		int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);
+		if(sent < protected) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d)\n", handle->handle_id, sent, protected);
+		}
+		/* Update stats */
+		if(sent > 0) {
+			/* Update the RTCP context as well */
+			janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+			guint32 timestamp = ntohl(header->timestamp);
+			medium->out_stats.info[0].packets++;
+			medium->out_stats.info[0].bytes += pkt->length;
+			/* Last second outgoing media */
+			gint64 now = janus_get_monotonic_time();
+			if(medium->out_stats.info[0].updated == 0)
+				medium->out_stats.info[0].updated = now;
+			if(now > medium->out_stats.info[0].updated &&
+					now - medium->out_stats.info[0].updated >= G_USEC_PER_SEC) {
+				medium->out_stats.info[0].bytes_lastsec = medium->out_stats.info[0].bytes_lastsec_temp;
+				medium->out_stats.info[0].bytes_lastsec_temp = 0;
+				medium->out_stats.info[0].updated = now;
+			}
+			medium->out_stats.info[0].bytes_lastsec_temp += pkt->length;
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			if(medium->last_ntp_ts == 0 || (gint32)(timestamp - medium->last_rtp_ts) > 0) {
+				medium->last_ntp_ts = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
+				medium->last_rtp_ts = timestamp;
+			}
+			if(medium->first_ntp_ts[0] == 0) {
+				medium->first_ntp_ts[0] = (gint64)tv.tv_sec*G_USEC_PER_SEC + tv.tv_usec;
+				medium->first_rtp_ts[0] = timestamp;
+			}
+			/* Update sent packets counter */
+			rtcp_context *rtcp_ctx = medium->rtcp_ctx[0];
+			if(rtcp_ctx) {
+				g_atomic_int_inc(&rtcp_ctx->sent_packets_since_last_rr);
+				if(pkt->type == JANUS_ICE_PACKET_AUDIO) {
+					/* Let's check if this is not Opus: in case we may need to change the timestamp base */
+					int pt = header->type;
+					uint32_t clock_rate = medium->clock_rates ?
+						GPOINTER_TO_UINT(g_hash_table_lookup(medium->clock_rates, GINT_TO_POINTER(pt))) : 48000;
+					if(rtcp_ctx->tb != clock_rate)
+						rtcp_ctx->tb = clock_rate;
+				}
+			}
+		}
+		if(medium->nack_queue_ms > 0 && !pkt->retransmission) {
+			/* Save the packet for retransmissions that may be needed later */
+			if(!medium->do_nacks) {
+				/* ... unless NACKs are disabled for this medium */
+				return G_SOURCE_CONTINUE;
+			}
+			if(p == NULL) {
+				/* If we're not doing RFC4588, we're saving the SRTP packet as it is */
+				p = g_malloc(sizeof(janus_rtp_packet));
+				p->data = g_malloc(protected);
+				memcpy(p->data, pkt->data, protected);
+				p->length = protected;
+				janus_plugin_rtp_extensions_reset(&p->extensions);
+			}
+			p->created = janus_get_monotonic_time();
+			p->last_retransmit = 0;
+			janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+			guint16 seq = ntohs(header->seq_number);
+			if(medium->retransmit_buffer == NULL) {
+				medium->retransmit_buffer = g_queue_new();
+				medium->retransmit_seqs = g_hash_table_new(NULL, NULL);
+			}
+			g_queue_push_tail(medium->retransmit_buffer, p);
+			/* Insert in the table too, for quick lookup */
+			g_hash_table_insert(medium->retransmit_seqs, GUINT_TO_POINTER(seq), p);
+		} else {
+			janus_ice_free_rtp_packet(p);
+		}
+	}
+	return G_SOURCE_CONTINUE;
 }
 
-void janus_ice_streaming_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet, guint helper_id) {
-	if(!handle || !handle->pc || handle->queued_packets == NULL || packet == NULL || packet->buffer == NULL ||
-			!janus_is_rtp(packet->buffer, packet->length))
+void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
+	if (!handle || !handle->pc)
 		return;
 
-	/* Queue this packet as it is (we'll prune/update/set extensions later) */
-	janus_ice_queued_packet *pkt = malloc_queued_packet(packet->length, helper_id);
-	pkt->mindex = packet->mindex;
-	memcpy(pkt->data, packet->buffer, packet->length);
-	pkt->length = packet->length;
-	pkt->type = packet->video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
-	pkt->extensions = packet->extensions;
+	janus_session *session = (janus_session *)handle->session;
+	janus_ice_peerconnection *pc = handle->pc;
+	janus_ice_peerconnection_medium *medium = NULL;
+	if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY)) {
+		return;
+	}
+	if (legnth == 0) {
+		return;
+	}
+	if (pc == 0 || !pc->cdone) {
+		return;
+	}
+	/* Find the right medium instance */
+	if(pkt->mindex != -1) {
+		medium = g_hash_table_lookup(pc->media, GINT_TO_POINTER(pkt->mindex));
+	} else {
+		janus_media_type mtype = janus_media_type_from_packet(pkt->type);
+		medium = g_hash_table_lookup(pc->media_bytype, GINT_TO_POINTER(mtype));
+	}
+	if(medium == NULL) {
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] No medium #%d associated to this packet??\n", handle->handle_id, pkt->mindex);
+		return;
+	}
+	if (!medium->send) {
+		return;
+	}
+
+	if(janus_is_webrtc_encryption_enabled() && (!pc->dtls || !pc->dtls->srtp_valid || !pc->dtls->srtp_out)) {
+		if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT) && !medium->noerrorlog) {
+			JANUS_LOG(LOG_WARN, "[%"SCNu64"] stream component has no valid SRTP session (yet?)\n", handle->handle_id);
+			medium->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
+		}
+		return;
+	}
+	medium->noerrorlog = FALSE;
+
+	GOutputVector buffers[num_packets];
+	NiceOutputMessage messages[num_packets];
+
+	janus_ice_queued_packet queued_packet;
+	janus_ice_queued_packet *pkt = &queued_packet;
 	pkt->control = FALSE;
 	pkt->encrypted = FALSE;
 	pkt->retransmission = FALSE;
 	pkt->label = NULL;
 	pkt->protocol = NULL;
-	pkt->added = janus_get_monotonic_time();
-	janus_ice_queue_packet(handle, pkt);
+
+	for (int i = 0; i < num_packets; i++) {
+		janus_plugin_streaming_rtp *spkt = &packets[i];
+		janus_plugin_rtp *packet = &spkt->packet;
+		pkt->mindex = packet->mindex;
+		pkt->length = packet->length;
+		pkt->type = packet->video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
+		pkt->extensions = packet->extensions;
+		if (packet->length + SRTP_MAX_TAG_LEN > spkt->length) {
+			g_free(spkt->buffer);
+			spkt->buffer = g_malloc(2 * (packet->length + SRTP_MAX_TAG_LEN));
+			spkt->length = 2 * (packet->length + SRTP_MAX_TAG_LEN);
+			packet->buffer = g_realloc(packet->buffer, 2 * (packet->length + SRTP_MAX_TAG_LEN));
+		}
+
+		pkt->data = spkt->buffer;
+		memmove(pkt->data, packet->buffer, packet->length);
+
+		janus_ice_rtp_extension_update(handle, medium, pkt);
+
+		janus_rtp_header *header = (janus_rtp_header *)pkt->data;
+
+		/* Not Retransmission */
+		header->ssrc = htonl(medium->ssrc);
+
+		if(medium->payload_type < 0) {
+			medium->payload_type = header->type;
+			if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
+					medium->rtx_payload_types && g_hash_table_size(medium->rtx_payload_types) > 0) {
+				medium->rtx_payload_type = GPOINTER_TO_INT(g_hash_table_lookup(medium->rtx_payload_types, GINT_TO_POINTER(medium->payload_type)));
+				JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Retransmissions will have payload type %d\n",
+					handle->handle_id, medium->rtx_payload_type);
+			}
+			if(medium->codec == NULL) {
+				janus_mutex_lock(&handle->mutex);
+				const char *codec = janus_get_codec_from_pt(handle->local_sdp, medium->payload_type);
+				janus_mutex_unlock(&handle->mutex);
+				if(codec != NULL)
+					medium->codec = g_strdup(codec);
+			}
+			if(video && medium->video_is_keyframe == NULL && medium->codec != NULL) {
+				if(!strcasecmp(medium->codec, "vp8"))
+					medium->video_is_keyframe = &janus_vp8_is_keyframe;
+				else if(!strcasecmp(medium->codec, "vp9"))
+					medium->video_is_keyframe = &janus_vp9_is_keyframe;
+				else if(!strcasecmp(medium->codec, "h264"))
+					medium->video_is_keyframe = &janus_h264_is_keyframe;
+				else if(!strcasecmp(medium->codec, "av1"))
+					medium->video_is_keyframe = &janus_av1_is_keyframe;
+				else if(!strcasecmp(medium->codec, "h265"))
+					medium->video_is_keyframe = &janus_h265_is_keyframe;
+			}
+		}
+
+		if(packet->video && nack_optimizations && medium->video_is_keyframe) {
+			int plen = 0;
+			char *payload = janus_rtp_payload(pkt->data, pkt->length, &plen);
+			if(medium->video_is_keyframe(payload, plen)) {
+				JANUS_LOG(LOG_HUGE, "[%"SCNu64"] Keyframe sent, cleaning retransmit buffer\n", handle->handle_id);
+				janus_cleanup_nack_buffer(0, pc, FALSE, TRUE);
+			}
+		}
+
+		janus_rtp_packet *p = NULL;
+		if(medium->nack_queue_ms > 0 
+			&& !pkt->retransmission
+			&& pkt->type == JANUS_ICE_PACKET_VIDEO
+			&& medium->do_nacks
+			&& janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
+			/* Save the packet for retransmissions that may be needed later: start by
+				* making room for two more bytes to store the original sequence number */
+			p = g_malloc(sizeof(janus_rtp_packet));
+			guint16 original_seq = header->seq_number;
+			p->data = g_malloc(pkt->length+2);
+			p->length = pkt->length+2;
+			/* Check where the payload starts */
+			int plen = 0;
+			char *payload = janus_rtp_payload(pkt->data, pkt->length, &plen);
+			if(plen == 0) {
+				JANUS_LOG(LOG_WARN, "[%"SCNu64"] Discarding outgoing empty RTP packet\n", handle->handle_id);
+				janus_ice_free_rtp_packet(p);
+				janus_ice_free_queued_packet(pkt);
+				return G_SOURCE_CONTINUE;
+			}
+			size_t hsize = payload - pkt->data;
+			/* Copy the header first */
+			memcpy(p->data, pkt->data, hsize);
+			/* Copy the original sequence number */
+			memcpy(p->data+hsize, &original_seq, 2);
+			/* Copy the extensions struct */
+			p->extensions = pkt->extensions;
+			/* Copy the payload */
+			memcpy(p->data+hsize+2, payload, pkt->length - hsize);
+		}
+		/* Encrypt SRTP */
+		int protected = pkt->length;
+		int res = janus_is_webrtc_encryption_enabled() ?
+			srtp_protect(pc->dtls->srtp_out, pkt->data, &protected) : srtp_err_status_ok;
+		if(res != srtp_err_status_ok) {
+			/* We don't spam the logs for every SRTP error: just take note of this, and print a summary later */
+			handle->srtp_errors_count++;
+			handle->last_srtp_error = res;
+			/* If we're debugging, though, print every occurrence */
+			guint32 timestamp = ntohl(header->timestamp);
+			guint16 seq = ntohs(header->seq_number);
+			JANUS_LOG(LOG_DBG, "[%"SCNu64"] ... SRTP protect error... %s (len=%d-->%d, ts=%"SCNu32", seq=%"SCNu16")...\n",
+				handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
+			janus_ice_free_rtp_packet(p);
+		} else {
+			/* Append */
+			buffers[i].buffer = pkt->data;
+			buffers[i].size = protected;
+			messages[i].buffers = &buffers[i];
+			messages[i].n_buffers = 1;
+
+			if(medium->nack_queue_ms > 0 && !pkt->retransmission) {
+				/* Save the packet for retransmissions that may be needed later */
+				if(!medium->do_nacks) {
+					/* ... unless NACKs are disabled for this medium */
+					continue;
+				}
+				if(p == NULL) {
+					/* If we're not doing RFC4588, we're saving the SRTP packet as it is */
+					p = g_malloc(sizeof(janus_rtp_packet));
+					p->data = g_malloc(protected);
+					memcpy(p->data, pkt->data, protected);
+					p->length = protected;
+					janus_plugin_rtp_extensions_reset(&p->extensions);
+				}
+				p->created = janus_get_monotonic_time();
+				p->last_retransmit = 0;
+				guint16 seq = ntohs(header->seq_number);
+				if(medium->retransmit_buffer == NULL) {
+					medium->retransmit_buffer = g_queue_new();
+					medium->retransmit_seqs = g_hash_table_new(NULL, NULL);
+				}
+				g_queue_push_tail(medium->retransmit_buffer, p);
+				/* Insert in the table too, for quick lookup */
+				g_hash_table_insert(medium->retransmit_seqs, GUINT_TO_POINTER(seq), p);
+			} else {
+				janus_ice_free_rtp_packet(p);
+			}
+		}
+	}
+
+	int res = nice_agent_send_messages_nonblocking(handle->agent, pc->stream_id, pc->component_id, &messages, num_packets, NULL, NULL);
+	if (res < 0) {
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
+	}
 }
 
 void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet) {
