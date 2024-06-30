@@ -627,6 +627,7 @@ janus_plugin_rtp *janus_plugin_rtp_duplicate(janus_plugin_rtp *packet);
 
 struct janus_plugin_streaming_rtp {
 	struct janus_plugin_rtp packet;
+	int mindex;
 	char *buffer;
 	uint16_t length;
 };

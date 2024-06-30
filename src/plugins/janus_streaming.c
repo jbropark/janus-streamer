@@ -10489,10 +10489,11 @@ static void janus_streaming_append_rtp_packet(
 			}
 		}
 	} else {
-		LOGGER_LOG(LOG_ERR, "Data packet is not supported\n");
+		JANUS_LOG(LOG_ERR, "Data packet is not supported\n");
 		return;
 	}
 
+	rtps[*rtp_index].mindex = packet->mindex;
 	janus_plugin_rtp *rtp = &(rtps[*rtp_index].packet);
 	// rtp->mindex = s->mindex; Later
 	rtp->video = packet->is_video;
@@ -10529,19 +10530,19 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 	if(!g_atomic_int_get(&session->started) || g_atomic_int_get(&session->paused)) {
 		return;
 	}
-	janus_streaming_session_stream *s = g_hash_table_lookup(session->streams_byid, GINT_TO_POINTER(packet->mindex));
-	if(s == NULL) {
-		/* No session stream for this mindex: maybe the viewer did not subscribe to it */
-		return;
-	}
-	/* Make sure we're allowed to send packets from this stream */
-	if(!s->send) {
-		return;
-	}
 
 	for (int i = 0; i < rtps->count; i++) {
-		janus_plugin_rtp *rtp = &(rtps[i].packet);
+		janus_plugin_rtp *rtp = &(rtps->packets[i].packet);
 		janus_rtp_header *header = (janus_rtp_header *)rtp->buffer;
+		janus_streaming_session_stream *s = g_hash_table_lookup(session->streams_byid, GINT_TO_POINTER(rtps->packets[i].mindex));
+		if(s == NULL) {
+			/* No session stream for this mindex: maybe the viewer did not subscribe to it */
+			continue;
+		}
+		/* Make sure we're allowed to send packets from this stream */
+		if(!s->send) {
+			continue;
+		}
 		rtp->mindex = s->mindex;
 		janus_rtp_header_update(header, &s->context, rtp->video, 0);
 		if(s->pt > 0)
