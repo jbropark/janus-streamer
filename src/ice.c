@@ -5022,7 +5022,7 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	}
 }
 
-void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
+static void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
 	if (!handle || !handle->pc)
 		return;
 
@@ -5113,7 +5113,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 				if(codec != NULL)
 					medium->codec = g_strdup(codec);
 			}
-			if(video && medium->video_is_keyframe == NULL && medium->codec != NULL) {
+			if(packet->video && medium->video_is_keyframe == NULL && medium->codec != NULL) {
 				if(!strcasecmp(medium->codec, "vp8"))
 					medium->video_is_keyframe = &janus_vp8_is_keyframe;
 				else if(!strcasecmp(medium->codec, "vp9"))
@@ -5155,7 +5155,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 				JANUS_LOG(LOG_WARN, "[%"SCNu64"] Discarding outgoing empty RTP packet\n", handle->handle_id);
 				janus_ice_free_rtp_packet(p);
 				janus_ice_free_queued_packet(pkt);
-				return G_SOURCE_CONTINUE;
+				continue;
 			}
 			size_t hsize = payload - pkt->data;
 			/* Copy the header first */

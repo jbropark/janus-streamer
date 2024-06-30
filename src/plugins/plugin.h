@@ -626,7 +626,7 @@ void janus_plugin_rtp_reset(janus_plugin_rtp *packet);
 janus_plugin_rtp *janus_plugin_rtp_duplicate(janus_plugin_rtp *packet);
 
 struct janus_plugin_streaming_rtp {
-	struct janus_plugin_rtp *packet;
+	struct janus_plugin_rtp packet;
 	char *buffer;
 	uint16_t length;
 };
