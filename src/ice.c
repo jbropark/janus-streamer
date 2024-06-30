@@ -4129,8 +4129,10 @@ static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_p
 	}
 	/* Check if we need to resize this packet buffer first */
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
+	/*
 	if(packet->length < totlen)
 		packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
+	*/
 	/* Now check if we need to move the payload */
 	payload = payload_start ? (packet->data + payload_start) : NULL;
 	if(payload != NULL && plen > 0 && packet->length != totlen)

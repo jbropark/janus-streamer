@@ -10527,9 +10527,6 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 	if(!session || !session->handle) {
 		return;
 	}
-	if(!g_atomic_int_get(&session->started) || g_atomic_int_get(&session->paused)) {
-		return;
-	}
 
 	for (int i = 0; i < rtps->count; i++) {
 		janus_plugin_rtp *rtp = &(rtps->packets[i].packet);
