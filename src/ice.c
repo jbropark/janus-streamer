@@ -3894,7 +3894,12 @@ void janus_ice_resend_trickles(janus_ice_handle *handle) {
 	janus_ice_notify_trickle(handle, NULL);
 }
 
-static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_peerconnection_medium *medium, janus_ice_queued_packet *packet) {
+static void janus_ice_rtp_extension_update(
+	janus_ice_handle *handle,
+	janus_ice_peerconnection_medium *medium,
+	janus_ice_queued_packet *packet,
+	int pkt_data_buf_len)
+{
 	if(handle == NULL || handle->pc == NULL || medium == NULL || packet == NULL || packet->data == NULL)
 		return;
 	uint16_t totlen = RTP_HEADER_SIZE;
@@ -4129,10 +4134,8 @@ static void janus_ice_rtp_extension_update(janus_ice_handle *handle, janus_ice_p
 	}
 	/* Check if we need to resize this packet buffer first */
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
-	/*
-	if(packet->length < totlen)
+	if(pkt_data_buf_len < totlen)
 		packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
-	*/
 	/* Now check if we need to move the payload */
 	payload = payload_start ? (packet->data + payload_start) : NULL;
 	if(payload != NULL && plen > 0 && packet->length != totlen)
@@ -4792,7 +4795,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				}
 			} else {
 				/* Prune/update/set RTP extensions */
-				janus_ice_rtp_extension_update(handle, medium, pkt);
+				janus_ice_rtp_extension_update(handle, medium, pkt, pkt->length);
 				/* Overwrite SSRC */
 				janus_rtp_header *header = (janus_rtp_header *)pkt->data;
 				if(!pkt->retransmission) {
@@ -5093,7 +5096,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 		}
 		medium->noerrorlog = FALSE;
 
-		janus_ice_rtp_extension_update(handle, medium, pkt);
+		janus_ice_rtp_extension_update(handle, medium, pkt, spkt->length);
 
 		janus_rtp_header *header = (janus_rtp_header *)pkt->data;
 

@@ -1285,6 +1285,7 @@ typedef struct janus_streaming_rtp_relay_packet {
 	janus_vp9_svc_info svc_info;
 	/* The following is only relevant for datachannels */
 	gboolean textdata;
+	gint64 added;
 } janus_streaming_rtp_relay_packet;
 static janus_streaming_rtp_relay_packet exit_packet;
 static void janus_streaming_rtp_relay_packet_free(janus_streaming_rtp_relay_packet *pkt) {
@@ -10466,10 +10467,9 @@ static void janus_streaming_helper_rtprtcp_packet(gpointer data, gpointer user_d
 	copy->ptype = packet->ptype;
 	copy->timestamp = packet->timestamp;
 	copy->seq_number = packet->seq_number;
+	copy->added = janus_get_monotonic_time();
 	g_async_queue_push(helper->queued_packets, copy);
 }
-
-#define SIZE 100
 
 static void janus_streaming_append_rtp_packet(
 	janus_streaming_rtp_relay_packet *packet,
@@ -10516,22 +10516,22 @@ static void janus_streaming_append_rtp_packet(
 	return;
 }
 
-typedef struct rtp_list {
+typedef struct streaming_rtp_array {
 	janus_plugin_streaming_rtp *packets;
-	int count;
-} rtp_list;
+	int length;
+} streaming_rtp_array;
 
 static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data) {
-	rtp_list *rtps = (rtp_list *)user_data;
+	streaming_rtp_array *rtp_array = (streaming_rtp_array *)user_data;
 	janus_streaming_session *session = (janus_streaming_session *)data;
 	if(!session || !session->handle) {
 		return;
 	}
 
-	for (int i = 0; i < rtps->count; i++) {
-		janus_plugin_rtp *rtp = &(rtps->packets[i].packet);
+	for (int i = 0; i < rtp_array->length; i++) {
+		janus_plugin_rtp *rtp = &(rtp_array->packets[i].packet);
 		janus_rtp_header *header = (janus_rtp_header *)rtp->buffer;
-		janus_streaming_session_stream *s = g_hash_table_lookup(session->streams_byid, GINT_TO_POINTER(rtps->packets[i].mindex));
+		janus_streaming_session_stream *s = g_hash_table_lookup(session->streams_byid, GINT_TO_POINTER(rtp_array->packets[i].mindex));
 		if(s == NULL) {
 			/* No session stream for this mindex: maybe the viewer did not subscribe to it */
 			continue;
@@ -10551,10 +10551,11 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 			}
 		}
 	}
-	gateway->relay_streaming_rtps(session->handle, rtps->packets, rtps->count);
+	gateway->relay_streaming_rtps(session->handle, rtp_array->packets, rtp_array->length);
 }
 
 #define MTU 1500
+#define MAX_BATCH_SIZE 100
 
 static void *janus_streaming_helper_thread(void *data) {
 	janus_streaming_helper *helper = (janus_streaming_helper *)data;
@@ -10562,13 +10563,15 @@ static void *janus_streaming_helper_thread(void *data) {
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Joining Streaming helper thread\n", mp->name, helper->id);
 	janus_streaming_rtp_relay_packet *pkt = NULL;
 
-	janus_plugin_streaming_rtp *packets = g_malloc0(sizeof(janus_plugin_streaming_rtp) * SIZE);
+	// alloc packets
+	janus_plugin_streaming_rtp *packets = g_malloc0(sizeof(janus_plugin_streaming_rtp) * MAX_BATCH_SIZE);
 	int buffer_size = MTU * 2;
-	for (int i = 0; i < SIZE; i++) {
-		packets[i].buffer = g_malloc(buffer_size);
+	for (int i = 0; i < MAX_BATCH_SIZE; i++) {
 		packets[i].length = buffer_size;
+		packets[i].buffer = g_malloc(buffer_size);
 		packets[i].packet.buffer = g_malloc(buffer_size);
 	}
+	streaming_rtp_array rtp_array = {packets, 0};
 
 	while(!g_atomic_int_get(&stopping) && !g_atomic_int_get(&mp->destroyed) && !g_atomic_int_get(&helper->destroyed)) {
 		int count = 0;
@@ -10577,40 +10580,49 @@ static void *janus_streaming_helper_thread(void *data) {
 		/* block here */
 		pkt = g_async_queue_pop(helper->queued_packets);
 
-		while (pkt && count < SIZE) {
+		while (pkt && count < MAX_BATCH_SIZE) {
 			if(pkt == &exit_packet) {
 				is_break = 1;
 				break;
 			}
 
-			if (pkt->is_rtp || pkt->is_data) {
-				/* RTP */
-				janus_streaming_append_rtp_packet(pkt, packets, &count);
-				janus_streaming_rtp_relay_packet_free(pkt);
+			gint64 age = (janus_get_monotonic_time() - pkt->added);
+			if(age > G_USEC_PER_SEC) {
+				JANUS_LOG(LOG_WARN, "[%s/#%d] Discarding too old outgoing packet (age=%"SCNi64"us)\n", mp->name, helper->id, age);
 			} else {
-				/* RTCP */
-				janus_mutex_lock(&helper->mutex);
-				g_list_foreach(helper->viewers, janus_streaming_relay_rtcp_packet, pkt);
-				janus_mutex_unlock(&helper->mutex);
-				janus_streaming_rtp_relay_packet_free(pkt);
+				if (pkt->is_rtp || pkt->is_data) {
+					/* RTP */
+					janus_streaming_append_rtp_packet(pkt, packets, &count);
+				} else {
+					/* RTCP */
+					janus_mutex_lock(&helper->mutex);
+					g_list_foreach(helper->viewers, janus_streaming_relay_rtcp_packet, pkt);
+					janus_mutex_unlock(&helper->mutex);
+				}
 			}
 
+			janus_streaming_rtp_relay_packet_free(pkt);
 			pkt = g_async_queue_try_pop(helper->queued_packets);
 		}
 
 		if (count > 0) {
-			rtp_list rtp_list = {packets, count};
-			g_list_foreach(helper->viewers, janus_streaming_relay_rtp_packets, &rtp_list);
+			rtp_array.length = count;
+			janus_mutex_lock(&helper->mutex);
+			g_list_foreach(helper->viewers, janus_streaming_relay_rtp_packets, &rtp_array);
+			janus_mutex_unlock(&helper->mutex);
 		}
 
 		if (is_break) break;
 	}
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Leaving Streaming helper thread\n", mp->name, helper->id);
-	for (int i = 0; i < SIZE; i++) {
+
+	/* free packets */
+	for (int i = 0; i < MAX_BATCH_SIZE; i++) {
 		g_free(packets[i].buffer);
 		g_free(packets[i].packet.buffer);
 	}
 	g_free(packets);
+
 	janus_refcount_decrease(&helper->ref);
 	janus_refcount_decrease(&mp->ref);
 	g_thread_unref(g_thread_self());
