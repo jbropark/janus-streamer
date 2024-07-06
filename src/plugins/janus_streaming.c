@@ -942,6 +942,8 @@ multistream-test: {
 #define JANUS_STREAMING_AUTHOR			"Meetecho s.r.l."
 #define JANUS_STREAMING_PACKAGE			"janus.plugin.streaming"
 
+#define MTU 1500
+
 /* Plugin methods */
 janus_plugin *create(void);
 int janus_streaming_init(janus_callbacks *callback, const char *config_path);
@@ -9054,7 +9056,7 @@ static void *janus_streaming_ondemand_thread(void *data) {
 #endif
 
 	/* Buffer */
-	char buf[1500];
+	char buf[MTU];
 	memset(buf, 0, sizeof(buf));
 	/* Set up RTP */
 	guint16 seq = 1;
@@ -9206,7 +9208,7 @@ static void *janus_streaming_filesource_thread(void *data) {
 #endif
 
 	/* Buffer */
-	char buf[1500];
+	char buf[MTU];
 	memset(buf, 0, sizeof(buf));
 	/* Set up RTP */
 	guint16 seq = 1;
@@ -9361,8 +9363,8 @@ static void *janus_streaming_relay_thread(void *data) {
 	struct sockaddr_storage remote;
 	int resfd = 0, bytes = 0;
 	struct pollfd *fds = g_malloc(num * sizeof(struct pollfd));
-	char buffer[1500];
-	memset(buffer, 0, 1500);
+	char buffer[MTU];
+	memset(buffer, 0, MTU);
 	/* We'll have a dynamic number of streams */
 #ifdef HAVE_LIBCURL
 	/* In case this is an RTSP restreamer, we may have to send keep-alive from time to time */
@@ -9589,7 +9591,7 @@ static void *janus_streaming_relay_thread(void *data) {
 				if(stream == NULL) {
 					/* No stream..? Shouldn't happen, read the bytes and dump them */
 					addrlen = sizeof(remote);
-					(void)recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					(void)recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					continue;
 				}
 				if(stream->type == JANUS_STREAMING_MEDIA_AUDIO && fds[i].fd == stream->fd[0]) {
@@ -9601,7 +9603,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					source->reconnect_timer = now;
 #endif
 					addrlen = sizeof(remote);
-					bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					if(bytes < 0 || !janus_is_rtp(buffer, bytes)) {
 						/* Failed to read or not an RTP packet? */
 						continue;
@@ -9692,7 +9694,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					source->reconnect_timer = now;
 #endif
 					addrlen = sizeof(remote);
-					bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					if(bytes < 0 || !janus_is_rtp(buffer, bytes)) {
 						/* Failed to read or not an RTP packet? */
 						continue;
@@ -9925,7 +9927,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					source->reconnect_timer = janus_get_monotonic_time();
 #endif
 					addrlen = sizeof(remote);
-					bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					if(bytes < 1) {
 						/* Failed to read? */
 						continue;
@@ -9970,7 +9972,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					continue;
 				} else if(fds[i].fd == stream->rtcp_fd) {
 					addrlen = sizeof(remote);
-					bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					if(bytes < 0 || (!janus_is_rtp(buffer, bytes) && !janus_is_rtcp(buffer, bytes))) {
 						/* For latching we need an RTP or RTCP packet */
 						continue;
@@ -10554,7 +10556,6 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 	gateway->relay_streaming_rtps(session->handle, rtp_array->packets, rtp_array->length);
 }
 
-#define MTU 1500
 #define MAX_BATCH_SIZE 100
 
 static void *janus_streaming_helper_thread(void *data) {
