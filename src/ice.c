@@ -28,6 +28,10 @@
 #include <stun/usages/bind.h>
 #include <nice/debug.h>
 
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+#include <linux/udp.h>
+
 #include "janus.h"
 #include "debug.h"
 #include "ice.h"
@@ -2147,6 +2151,19 @@ static void janus_ice_cb_component_state_changed(NiceAgent *agent, guint stream_
 		janus_events_notify_handlers(JANUS_EVENT_TYPE_WEBRTC, JANUS_EVENT_SUBTYPE_WEBRTC_ICE,
 			session->session_id, handle->handle_id, handle->opaque_id, info);
 	}
+
+	if(state == NICE_COMPONENT_STATE_CONNECTED) {
+		GError *error = NULL;
+		GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
+		if (gsock) {
+			gint gso_size = ETH_DATA_LEN - sizeof(struct iphdr) - sizeof(struct udphdr);
+			if (!g_socket_set_option(gsock, IPPROTO_UDP, UDP_SEGMENT, gso_size, &error)) {
+				JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to set UDP segment size to %d: %s\n", handle->handle_id, gso_size, error->message);
+				g_clear_error(&error);
+			}
+		}
+	}
+
 	/* FIXME Even in case the state is 'connected', we wait for the 'new-selected-pair' callback to do anything */
 	if(state == NICE_COMPONENT_STATE_FAILED) {
 		/* Failed doesn't mean necessarily we need to give up: we may be trickling */
