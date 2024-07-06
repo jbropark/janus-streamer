@@ -2153,9 +2153,9 @@ static void janus_ice_cb_component_state_changed(NiceAgent *agent, guint stream_
 	}
 
 	if(state == NICE_COMPONENT_STATE_CONNECTED) {
-		GError *error = NULL;
 		GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
 		if (gsock) {
+			GError *error = NULL;
 			gint gso_size = ETH_DATA_LEN - sizeof(struct iphdr) - sizeof(struct udphdr);
 			if (!g_socket_set_option(gsock, IPPROTO_UDP, UDP_SEGMENT, gso_size, &error)) {
 				JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to set UDP segment size to %d: %s\n", handle->handle_id, gso_size, error->message);
