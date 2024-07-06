@@ -829,6 +829,7 @@ void janus_session_notify_event(janus_session *session, json_t *event) {
 
 /* Destroys a session but does not remove it from the sessions hash table. */
 gint janus_session_destroy(janus_session *session) {
+	return 0;
 	guint64 session_id = session->session_id;
 	JANUS_LOG(LOG_INFO, "Destroying session %"SCNu64"; %p\n", session_id, session);
 	if(!g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
