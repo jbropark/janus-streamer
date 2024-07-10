@@ -234,6 +234,8 @@ typedef struct janus_plugin_data janus_plugin_data;
 
 typedef struct janus_plugin_streaming_rtp janus_plugin_streaming_rtp;
 
+typedef struct janus_streaming_context janus_streaming_context;
+
 /* Use forward declaration to avoid including jansson.h */
 typedef struct json_t json_t;
 
@@ -373,7 +375,7 @@ struct janus_callbacks {
 	/*! \brief Callback to relay RTP packet arrays to a peer
 	 * @param[in] handle The plugin/gateway session used for this peer
 	 * @param[in] packet The RTP packet and related data */
-	void (* const relay_streaming_rtps)(janus_plugin_session *handle, janus_plugin_streaming_rtp *packets, int num_packets);
+	void (* const relay_streaming_rtps)(janus_plugin_session *handle, janus_streaming_context *sctx);
 	/*! \brief Callback to relay RTCP messages to a peer
 	 * @param[in] handle The plugin/gateway session that will be used for this peer
 	 * @param[in] packet The RTCP packet and related data */
@@ -630,6 +632,13 @@ struct janus_plugin_streaming_rtp {
 	int mindex;
 	char *buffer;
 	uint16_t length;
+};
+
+struct janus_streaming_context {
+	struct janus_plugin_rtp *packets;
+	int *mindexes;
+	char *buf;
+	int count;
 };
 
 /*! \brief Janus plugin RTCP packet */

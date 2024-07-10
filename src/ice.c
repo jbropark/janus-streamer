@@ -28,8 +28,6 @@
 #include <stun/usages/bind.h>
 #include <nice/debug.h>
 
-#include <linux/if_ether.h>
-#include <linux/ip.h>
 #include <linux/udp.h>
 
 #include "janus.h"
@@ -2152,18 +2150,6 @@ static void janus_ice_cb_component_state_changed(NiceAgent *agent, guint stream_
 			session->session_id, handle->handle_id, handle->opaque_id, info);
 	}
 
-	if(state == NICE_COMPONENT_STATE_CONNECTED) {
-		GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
-		if (gsock) {
-			GError *error = NULL;
-			gint gso_size = ETH_DATA_LEN - sizeof(struct iphdr) - sizeof(struct udphdr);
-			if (!g_socket_set_option(gsock, IPPROTO_UDP, UDP_SEGMENT, gso_size, &error)) {
-				JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to set UDP segment size to %d: %s\n", handle->handle_id, gso_size, error->message);
-				g_clear_error(&error);
-			}
-		}
-	}
-
 	/* FIXME Even in case the state is 'connected', we wait for the 'new-selected-pair' callback to do anything */
 	if(state == NICE_COMPONENT_STATE_FAILED) {
 		/* Failed doesn't mean necessarily we need to give up: we may be trickling */
@@ -3915,7 +3901,7 @@ static void janus_ice_rtp_extension_update(
 	janus_ice_handle *handle,
 	janus_ice_peerconnection_medium *medium,
 	janus_ice_queued_packet *packet,
-	int pkt_data_buf_len)
+	int allow_realloc)
 {
 	if(handle == NULL || handle->pc == NULL || medium == NULL || packet == NULL || packet->data == NULL)
 		return;
@@ -4151,7 +4137,7 @@ static void janus_ice_rtp_extension_update(
 	}
 	/* Check if we need to resize this packet buffer first */
 	uint16_t payload_start = payload ? (payload - packet->data) : 0;
-	if(pkt_data_buf_len < totlen)
+	if(allow_realloc && packet->length < totlen)
 		packet->data = g_realloc(packet->data, totlen + SRTP_MAX_TAG_LEN);
 	/* Now check if we need to move the payload */
 	payload = payload_start ? (packet->data + payload_start) : NULL;
@@ -4812,7 +4798,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				}
 			} else {
 				/* Prune/update/set RTP extensions */
-				janus_ice_rtp_extension_update(handle, medium, pkt, pkt->length);
+				janus_ice_rtp_extension_update(handle, medium, pkt, 1);
 				/* Overwrite SSRC */
 				janus_rtp_header *header = (janus_rtp_header *)pkt->data;
 				if(!pkt->retransmission) {
@@ -5044,7 +5030,7 @@ static void janus_ice_queue_packet(janus_ice_handle *handle, janus_ice_queued_pa
 	}
 }
 
-void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_streaming_rtp *packets, int num_packets) {
+void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_context *sctx) {
 	if (!handle || !handle->pc)
 		return;
 
@@ -5053,16 +5039,14 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 	if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY)) {
 		return;
 	}
-	if (num_packets == 0) {
+	if (sctx->count == 0) {
 		return;
 	}
 	if (pc == 0 || !pc->cdone) {
 		return;
 	}
 
-	GOutputVector buffers[num_packets];
-	NiceOutputMessage messages[num_packets];
-	int num_messages = 0;
+	// struct msghdr msg;
 
 	janus_ice_queued_packet queued_packet;
 	janus_ice_queued_packet *pkt = &queued_packet;
@@ -5072,21 +5056,17 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 	pkt->label = NULL;
 	pkt->protocol = NULL;
 
-	for (int i = 0; i < num_packets; i++) {
-		janus_plugin_streaming_rtp *spkt = &(packets[i]);
-		janus_plugin_rtp *packet = &(spkt->packet);
+	gint gso_size = 0;
+	unsigned int bytes = 0;
+
+	for (int i = 0; i < sctx->count; i++) {
+		janus_plugin_rtp *packet = &sctx->packets[i];
 		pkt->mindex = packet->mindex;
 		pkt->length = packet->length;
 		pkt->type = packet->video ? JANUS_ICE_PACKET_VIDEO : JANUS_ICE_PACKET_AUDIO;
 		pkt->extensions = packet->extensions;
-		if (packet->length + SRTP_MAX_TAG_LEN > spkt->length) {
-			g_free(spkt->buffer);
-			spkt->buffer = g_malloc(2 * (packet->length + SRTP_MAX_TAG_LEN));
-			spkt->length = 2 * (packet->length + SRTP_MAX_TAG_LEN);
-			packet->buffer = g_realloc(packet->buffer, 2 * (packet->length + SRTP_MAX_TAG_LEN));
-		}
 
-		pkt->data = spkt->buffer;
+		pkt->data = sctx->buf + bytes;
 		memmove(pkt->data, packet->buffer, packet->length);
 
 		/* Find the right medium instance */
@@ -5113,7 +5093,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 		}
 		medium->noerrorlog = FALSE;
 
-		janus_ice_rtp_extension_update(handle, medium, pkt, spkt->length);
+		janus_ice_rtp_extension_update(handle, medium, pkt, 0);
 
 		janus_rtp_header *header = (janus_rtp_header *)pkt->data;
 
@@ -5205,11 +5185,9 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 			janus_ice_free_rtp_packet(p);
 		} else {
 			/* Append */
-			buffers[num_messages].buffer = pkt->data;
-			buffers[num_messages].size = protected;
-			messages[num_messages].buffers = &buffers[i];
-			messages[num_messages].n_buffers = 1;
-			num_messages++;
+			if (gso_size == 0)
+				gso_size = protected;
+			bytes += protected;
 
 			if(medium->nack_queue_ms > 0 && !pkt->retransmission) {
 				/* Save the packet for retransmissions that may be needed later */
@@ -5241,7 +5219,23 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 		}
 	}
 
+	/*
 	int res = nice_agent_send_messages_nonblocking(handle->agent, pc->stream_id, pc->component_id, messages, num_messages, NULL, NULL);
+	if (res < 0) {
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
+	}
+	*/
+
+	GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
+	if (gsock) {
+		GError *error = NULL;
+		if (!g_socket_set_option(gsock, IPPROTO_UDP, UDP_SEGMENT, gso_size, &error)) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] Failed to set UDP segment size to %d: %s\n", handle->handle_id, gso_size, error->message);
+			g_clear_error(&error);
+		}
+	}
+
+	gint res = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, bytes, sctx->buf);
 	if (res < 0) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
 	}
