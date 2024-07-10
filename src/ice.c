@@ -5228,7 +5228,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 	NiceCandidate *local;
 	NiceCandidate *remote;
 
-	if (nice_agent_get_selected_pair(handle->agent, handle->stream_id, 1, &local, &remote)) {
+	if (!nice_agent_get_selected_pair(handle->agent, handle->stream_id, 1, &local, &remote)) {
 		return;
 	}
 
@@ -5242,12 +5242,15 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 		return;
 	}
 
+	char conbuf[CMSG_SPACE(sizeof(uint16_t))];
 	struct iovec iov = { .iov_base = sctx->buf, .iov_len = bytes };
 	struct msghdr msg = {
-		.msg_name = &local->addr.s.ip4,
-		.msg_namelen = sizeof(local->addr.s.ip4),
+		.msg_name = &remote->addr.s.ip4,
+		.msg_namelen = sizeof(remote->addr.s.ip4),
 		.msg_iov = &iov,
 		.msg_iovlen = 1,
+		.msg_control = conbuf,
+		.msg_controllen = sizeof(conbuf),
 	};
 	struct cmsghdr *cm = CMSG_FIRSTHDR(&msg);
 	cm->cmsg_level = IPPROTO_UDP;
