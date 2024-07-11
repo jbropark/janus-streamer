@@ -5205,6 +5205,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 			/* Append */
 			if (prev == 0 || prev < protected) {
 				msgcount++;  // append new message
+				sctx->msgs[msgcount - 1].msg_len = 0;
 				sctx->msgs[msgcount - 1].msg_hdr.msg_name = &remote->addr.s.ip4;
 				sctx->msgs[msgcount - 1].msg_hdr.msg_namelen = sizeof(remote->addr.s.ip4);
 				sctx->iovecs[msgcount - 1].iov_base = pkt->data;
@@ -5250,35 +5251,10 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 		}
 	}
 
-	/*
-	char conbuf[CMSG_SPACE(sizeof(uint16_t))];
-	struct iovec iov = { .iov_base = sctx->buf, .iov_len = bytes };
-	struct msghdr msg = {
-		.msg_name = &remote->addr.s.ip4,
-		.msg_namelen = sizeof(remote->addr.s.ip4),
-		.msg_iov = &iov,
-		.msg_iovlen = 1,
-		.msg_control = conbuf,
-		.msg_controllen = sizeof(conbuf),
-	};
-	struct cmsghdr *cm = CMSG_FIRSTHDR(&msg);
-	cm->cmsg_level = IPPROTO_UDP;
-	cm->cmsg_type = UDP_SEGMENT;
-	cm->cmsg_len = CMSG_LEN(sizeof(uint16_t));
-	*((uint16_t *) CMSG_DATA(cm)) = gso_size;
-	*/
-
 	int res = sendmmsg(fd, sctx->msgs, msgcount, 0);
 	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, strerror(errno));
 	}
-
-	/*
-	gint res = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, bytes, sctx->buf);
-	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
-	}
-	*/
 }
 
 void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet) {
