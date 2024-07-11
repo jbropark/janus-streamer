@@ -5253,7 +5253,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 
 	int res = sendmmsg(fd, sctx->msgs, msgcount, 0);
 	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, strerror(errno));
+		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %s\n", handle->handle_id, strerror(errno));
 	}
 }
 
