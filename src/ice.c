@@ -5046,6 +5046,23 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 		return;
 	}
 
+	NiceCandidate *local;
+	NiceCandidate *remote;
+
+	if (!nice_agent_get_selected_pair(handle->agent, handle->stream_id, 1, &local, &remote)) {
+		return;
+	}
+
+	GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
+	if (gsock == NULL) {
+		return;
+	}
+
+	int fd = g_socket_get_fd(gsock);
+	if (fd < 0) {
+		return;
+	}
+
 	// struct msghdr msg;
 
 	janus_ice_queued_packet queued_packet;
@@ -5056,8 +5073,9 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 	pkt->label = NULL;
 	pkt->protocol = NULL;
 
-	uint16_t gso_size = 0;
 	unsigned int bytes = 0;
+	uint16_t prev = 0;
+	int msgcount = 0;
 
 	for (int i = 0; i < sctx->count; i++) {
 		janus_plugin_rtp *packet = &sctx->packets[i];
@@ -5185,10 +5203,23 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 			janus_ice_free_rtp_packet(p);
 		} else {
 			/* Append */
-			if (gso_size == 0)
-				gso_size = (uint16_t)protected;
+			if (prev == 0 || prev < protected) {
+				msgcount++;  // append new message
+				sctx->msgs[msgcount - 1].msg_hdr.msg_name = &remote->addr.s.ip4;
+				sctx->msgs[msgcount - 1].msg_hdr.msg_namelen = sizeof(remote->addr.s.ip4);
+				sctx->iovecs[msgcount - 1].iov_base = pkt->data;
+				sctx->iovecs[msgcount - 1].iov_len = protected;
+				*((uint16_t *) CMSG_DATA(sctx->cms[msgcount - 1])) = protected;
+				prev = protected;
+			} else if (prev == protected) {
+				sctx->iovecs[msgcount - 1].iov_len += protected;
+			} else {
+				sctx->iovecs[msgcount - 1].iov_len += protected;
+				prev = 0;
+			}
 			bytes += protected;
 
+			/* Prepare Retransmission */
 			if(medium->nack_queue_ms > 0 && !pkt->retransmission) {
 				/* Save the packet for retransmissions that may be needed later */
 				if(!medium->do_nacks) {
@@ -5220,28 +5251,6 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 	}
 
 	/*
-	int res = nice_agent_send_messages_nonblocking(handle->agent, pc->stream_id, pc->component_id, messages, num_messages, NULL, NULL);
-	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
-	}
-	*/
-	NiceCandidate *local;
-	NiceCandidate *remote;
-
-	if (!nice_agent_get_selected_pair(handle->agent, handle->stream_id, 1, &local, &remote)) {
-		return;
-	}
-
-	GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
-	if (gsock == NULL) {
-		return;
-	}
-
-	int fd = g_socket_get_fd(gsock);
-	if (fd < 0) {
-		return;
-	}
-
 	char conbuf[CMSG_SPACE(sizeof(uint16_t))];
 	struct iovec iov = { .iov_base = sctx->buf, .iov_len = bytes };
 	struct msghdr msg = {
@@ -5257,8 +5266,9 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 	cm->cmsg_type = UDP_SEGMENT;
 	cm->cmsg_len = CMSG_LEN(sizeof(uint16_t));
 	*((uint16_t *) CMSG_DATA(cm)) = gso_size;
+	*/
 
-	int res = sendmsg(fd, &msg, 0);
+	int res = sendmmsg(fd, sctx->msgs, msgcount, 0);
 	if (res < 0) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
 	}

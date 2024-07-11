@@ -636,7 +636,10 @@ struct janus_plugin_streaming_rtp {
 
 struct janus_streaming_context {
 	struct janus_plugin_rtp *packets;
-	int *mindexes;
+	struct mmsghdr *msgs;
+	struct iovec *iovecs;
+	struct cmsghdr **cms;
+	char *msg_controls;
 	char *buf;
 	int count;
 };
