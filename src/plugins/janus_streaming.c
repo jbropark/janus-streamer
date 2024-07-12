@@ -10553,19 +10553,19 @@ static void *janus_streaming_helper_thread(void *data) {
 
 	// alloc packets
 	janus_streaming_context sctx;
-	sctx.buf = g_malloc0(MTU * MAX_BATCH_SIZE);
-	sctx.msgs = g_malloc0(sizeof(struct msghdr) * MAX_BATCH_SIZE);
-	sctx.iovecs = g_malloc0(sizeof(struct iovec) * MAX_BATCH_SIZE);
-	sctx.packets = g_malloc0(sizeof(janus_plugin_rtp) * MAX_BATCH_SIZE);
-	sctx.cms = g_malloc(sizeof(struct cmsghdr*) * MAX_BATCH_SIZE);
-	sctx.msg_controls = g_malloc0(sizeof(janus_streaming_cmsghdr) * MAX_BATCH_SIZE);
+	sctx.buf = (char*)g_malloc0(MTU * MAX_BATCH_SIZE);
+	sctx.mmsgs = (struct mmsghdr*)g_malloc0(sizeof(struct mmsghdr) * MAX_BATCH_SIZE);
+	sctx.iovecs = (struct iovec*)g_malloc0(sizeof(struct iovec) * MAX_BATCH_SIZE);
+	sctx.packets = (janus_plugin_rtp*)g_malloc0(sizeof(janus_plugin_rtp) * MAX_BATCH_SIZE);
+	sctx.cms = (struct cmsghdr**)g_malloc(sizeof(struct cmsghdr*) * MAX_BATCH_SIZE);
+	sctx.msg_controls = (janus_streaming_cmsghdr*)g_malloc0(sizeof(janus_streaming_cmsghdr) * MAX_BATCH_SIZE);
 	for (int i = 0; i < MAX_BATCH_SIZE; i++) {
-		sctx.msgs[i].msg_hdr.msg_iov = &sctx.iovecs[i];
-		sctx.msgs[i].msg_hdr.msg_iovlen = 1;
-		sctx.msgs[i].msg_hdr.msg_control = &sctx.msg_controls[i];
-		sctx.msgs[i].msg_hdr.msg_controllen = sizeof(janus_streaming_cmsghdr);
-		sctx.msgs[i].msg_hdr.msg_flags = 0;
-		sctx.cms[i] = CMSG_FIRSTHDR(&sctx.msgs[i].msg_hdr);
+		sctx.mmsgs[i].msg_hdr.msg_iov = &sctx.iovecs[i];
+		sctx.mmsgs[i].msg_hdr.msg_iovlen = 1;
+		sctx.mmsgs[i].msg_hdr.msg_control = &sctx.msg_controls[i];
+		sctx.mmsgs[i].msg_hdr.msg_controllen = sizeof(janus_streaming_cmsghdr);
+		sctx.mmsgs[i].msg_hdr.msg_flags = 0;
+		sctx.cms[i] = CMSG_FIRSTHDR(&sctx.mmsgs[i].msg_hdr);
 		sctx.cms[i]->cmsg_level = IPPROTO_UDP;
 		sctx.cms[i]->cmsg_type = UDP_SEGMENT;
 		sctx.cms[i]->cmsg_len = CMSG_LEN(sizeof(uint16_t));
@@ -10627,7 +10627,7 @@ static void *janus_streaming_helper_thread(void *data) {
 
 	/* free packets */
 	g_free(sctx.buf);
-	g_free(sctx.msgs);
+	g_free(sctx.mmsgs);
 	g_free(sctx.iovecs);
 	g_free(sctx.packets);
 	g_free(sctx.cms);

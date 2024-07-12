@@ -5201,9 +5201,9 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 			/* Append */
 			if (prev == 0 || prev < protected) {
 				msgcount++;  // append new message
-				sctx->msgs[msgcount - 1].msg_len = 0;
-				sctx->msgs[msgcount - 1].msg_hdr.msg_name = &remote->addr.s.ip4;
-				sctx->msgs[msgcount - 1].msg_hdr.msg_namelen = sizeof(remote->addr.s.ip4);
+				sctx->mmsgs[msgcount - 1].msg_len = 0;
+				sctx->mmsgs[msgcount - 1].msg_hdr.msg_name = &remote->addr.s.ip4;
+				sctx->mmsgs[msgcount - 1].msg_hdr.msg_namelen = sizeof(remote->addr.s.ip4);
 				sctx->iovecs[msgcount - 1].iov_base = pkt->data;
 				sctx->iovecs[msgcount - 1].iov_len = protected;
 				*((uint16_t *) CMSG_DATA(sctx->cms[msgcount - 1])) = protected;
@@ -5247,7 +5247,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 		}
 	}
 
-	int res = sendmmsg(fd, sctx->msgs, msgcount, 0);
+	int res = sendmmsg(fd, sctx->mmsgs, msgcount, 0);
 	if (res < 0) {
 		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %s\n", handle->handle_id, strerror(errno));
 	}

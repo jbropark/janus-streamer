@@ -642,7 +642,7 @@ typedef union janus_streaming_cmsghdr {
 
 struct janus_streaming_context {
 	struct janus_plugin_rtp *packets;
-	struct mmsghdr *msgs;
+	struct mmsghdr *mmsgs;
 	struct iovec *iovecs;
 	struct cmsghdr **cms;
 	janus_streaming_cmsghdr *msg_controls;
