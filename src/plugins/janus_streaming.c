@@ -10472,7 +10472,7 @@ static void janus_streaming_helper_rtprtcp_packet(gpointer data, gpointer user_d
 	copy->codec = packet->codec;
 	copy->substream = packet->substream;
 	copy->svc = packet->svc;
-	if(copy->svc)
+	if(packet->svc)
 		copy->svc_info = packet->svc_info;
 	copy->ptype = packet->ptype;
 	copy->timestamp = packet->timestamp;
