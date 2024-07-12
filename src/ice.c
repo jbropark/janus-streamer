@@ -5049,11 +5049,7 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 	NiceCandidate *local;
 	NiceCandidate *remote;
 
-	if (!nice_agent_get_selected_pair(handle->agent, handle->stream_id, 1, &local, &remote)) {
-		return;
-	}
-
-	GSocket *gsock = nice_agent_get_selected_socket(handle->agent, handle->stream_id, 1);
+	GSocket *gsock = nice_agent_get_selected_socket_with_pair(handle->agent, handle->stream_id, 1, &local, &remote);
 	if (gsock == NULL) {
 		return;
 	}
