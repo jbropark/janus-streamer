@@ -156,6 +156,7 @@ janus_plugin *create(void) {
 #include <ctype.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <sys/socket.h>
 
 #include <glib.h>
 
@@ -634,12 +635,17 @@ struct janus_plugin_streaming_rtp {
 	uint16_t length;
 };
 
+typedef union janus_streaming_cmsghdr {
+	struct cmsghdr cmsg;
+	char buf[CMSG_SPACE(sizeof(uint16_t))];
+} janus_streaming_cmsghdr;
+
 struct janus_streaming_context {
 	struct janus_plugin_rtp *packets;
 	struct mmsghdr *msgs;
 	struct iovec *iovecs;
 	struct cmsghdr **cms;
-	char *msg_controls;
+	janus_streaming_cmsghdr *msg_controls;
 	char *buf;
 	int count;
 };

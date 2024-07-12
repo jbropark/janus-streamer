@@ -10558,12 +10558,12 @@ static void *janus_streaming_helper_thread(void *data) {
 	sctx.iovecs = g_malloc0(sizeof(struct iovec) * MAX_BATCH_SIZE);
 	sctx.packets = g_malloc0(sizeof(janus_plugin_rtp) * MAX_BATCH_SIZE);
 	sctx.cms = g_malloc(sizeof(struct cmsghdr*) * MAX_BATCH_SIZE);
-	sctx.msg_controls = g_malloc0(CMSG_SPACE(sizeof(uint16_t)) * MAX_BATCH_SIZE);
+	sctx.msg_controls = g_malloc0(sizeof(janus_streaming_cmsghdr) * MAX_BATCH_SIZE);
 	for (int i = 0; i < MAX_BATCH_SIZE; i++) {
 		sctx.msgs[i].msg_hdr.msg_iov = &sctx.iovecs[i];
 		sctx.msgs[i].msg_hdr.msg_iovlen = 1;
-		sctx.msgs[i].msg_hdr.msg_control = sctx.msg_controls + CMSG_SPACE(sizeof(uint16_t)) * i;
-		sctx.msgs[i].msg_hdr.msg_controllen = CMSG_SPACE(sizeof(uint16_t));
+		sctx.msgs[i].msg_hdr.msg_control = &sctx.msg_controls[i];
+		sctx.msgs[i].msg_hdr.msg_controllen = sizeof(janus_streaming_cmsghdr);
 		sctx.msgs[i].msg_hdr.msg_flags = 0;
 		sctx.cms[i] = CMSG_FIRSTHDR(&sctx.msgs[i].msg_hdr);
 		sctx.cms[i]->cmsg_level = IPPROTO_UDP;
