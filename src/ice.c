@@ -5043,10 +5043,6 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 		return;
 	}
 
-	GOutputVector buffers[num_packets];
-	NiceOutputMessage messages[num_packets];
-	int num_messages = 0;
-
 	janus_ice_queued_packet queued_packet;
 	janus_ice_queued_packet *pkt = &queued_packet;
 	pkt->control = FALSE;
@@ -5187,12 +5183,10 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 				handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
 			janus_ice_free_rtp_packet(p);
 		} else {
-			/* Append */
-			buffers[num_messages].buffer = pkt->data;
-			buffers[num_messages].size = protected;
-			messages[num_messages].buffers = &buffers[i];
-			messages[num_messages].n_buffers = 1;
-			num_messages++;
+			int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);
+			if(sent < protected) {
+				JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d)\n", handle->handle_id, sent, protected);
+			}
 
 			if(medium->nack_queue_ms > 0 && !pkt->retransmission) {
 				/* Save the packet for retransmissions that may be needed later */
@@ -5222,11 +5216,6 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_plugin_strea
 				janus_ice_free_rtp_packet(p);
 			}
 		}
-	}
-
-	int res = nice_agent_send_messages_nonblocking(handle->agent, pc->stream_id, pc->component_id, messages, num_messages, NULL, NULL);
-	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %d\n", handle->handle_id, res);
 	}
 }
 
