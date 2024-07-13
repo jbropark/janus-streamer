@@ -5247,9 +5247,11 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 		}
 	}
 
-	int res = sendmmsg(fd, sctx->mmsgs, msgcount, 0);
-	if (res < 0) {
-		JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming messages: %s\n", handle->handle_id, strerror(errno));
+	for (int i = 0; i < msgcount; i++) {
+		int res = sendmsg(fd, &sctx->mmsgs[i].msg_hdr, 0);
+		if (res < 0) {
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] Error sending streaming message: %s\n", handle->handle_id, strerror(errno));
+		}
 	}
 }
 
