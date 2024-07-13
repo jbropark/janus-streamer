@@ -10581,7 +10581,7 @@ static void *janus_streaming_helper_thread(void *data) {
 		/* block here */
 		pkt = g_async_queue_pop(helper->queued_packets);
 
-		while (pkt && count < MAX_BATCH_SIZE) {
+		while (pkt) {
 			if(pkt == &exit_packet) {
 				is_break = 1;
 				break;
@@ -10603,6 +10603,10 @@ static void *janus_streaming_helper_thread(void *data) {
 			}
 
 			janus_streaming_rtp_relay_packet_free(pkt);
+
+			if (count >= MAX_BATCH_SIZE) {
+				break;
+			}
 			pkt = g_async_queue_try_pop(helper->queued_packets);
 		}
 
