@@ -681,8 +681,13 @@ void init_prealloc(int threads, guint size) {
 
 	for (janus_preallocated_queued_packet *prepkt = prealloc_start; prepkt < prealloc_end; prepkt++) {
 		janus_ice_queued_packet *pkt = (janus_ice_queued_packet*)prepkt;
-		pkt->data = NULL;
-		prepkt->length = 0;
+		pkt->data = g_malloc(1500);
+		if (pkt->data == NULL) {
+			JANUS_LOG(LOG_ERR, "Failed to allocate memory for preallocated packet\n");
+			prepkt->length = 0;
+			continue;
+		}
+		prepkt->length = 1500;
 	}
 
 	prealloc_queues = g_malloc(sizeof(GAsyncQueue*) * prealloc_threads);
