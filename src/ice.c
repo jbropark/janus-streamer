@@ -4888,7 +4888,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				} else {
 					/* Shoot! */
 					int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);
-					if(sent < protected) {
+					if(sent < protected && sent >= 0) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d)\n", handle->handle_id, sent, protected);
 					}
 					/* Update stats */
