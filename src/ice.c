@@ -1411,6 +1411,10 @@ janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque
 	handle->app_handle = NULL;
 	handle->queued_candidates = g_async_queue_new();
 	handle->queued_packets = g_async_queue_new();
+
+	handle->latency = 0;
+	handle->pkt_count = 0;
+
 	janus_mutex_init(&handle->mutex);
 	janus_flags_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT);
 	janus_session_handles_insert(session, handle);
@@ -4889,13 +4893,13 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 				} else {
 					/* Shoot! */
 					if (pkt->time_in) {
-						medium->out_stats.pkt_count++;
-						medium->out_stats.latency += (janus_get_monotonic_time() - pkt->time_in);
+						handle->pkt_count++;
+						handle->latency += (janus_get_monotonic_time() - pkt->time_in);
 						// JANUS_LOG(LOG_ERR, "latency: %"SCNu64", count: %"SCNu64"\n", medium->out_stats.latency, medium->out_stats.pkt_count);
-						if (medium->out_stats.pkt_count > 10000) {
-							JANUS_LOG(LOG_ERR, "mean latency: %"SCNu64"\n", medium->out_stats.latency / medium->out_stats.pkt_count);
-							medium->out_stats.pkt_count = 0;
-							medium->out_stats.latency = 0;
+						if (handle->pkt_count >= 10000) {
+							JANUS_LOG(LOG_ERR, "mean latency: %"SCNu64"\n", handle->latency / handle->pkt_count);
+							handle->pkt_count = 0;
+							handle->latency = 0;
 						}
 					}
 					int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);

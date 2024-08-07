@@ -319,9 +319,6 @@ typedef struct janus_ice_stats {
 	janus_ice_stats_info info[3];
 	/*! \brief Last known count of lost packets (for slow_link) */
 	guint sl_lost_count;
-
-	guint64 pkt_count;
-	guint64 latency;
 } janus_ice_stats;
 
 /*! \brief Quick helper method to notify a WebRTC hangup through the Janus API
@@ -431,6 +428,9 @@ struct janus_ice_handle {
 	volatile gint destroyed;
 	/*! \brief Reference counter for this instance */
 	janus_refcount ref;
+
+	guint64 pkt_count;
+	guint64 latency;
 };
 
 /*! \brief Janus handle WebRTC PeerConnection */
