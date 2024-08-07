@@ -1285,6 +1285,8 @@ typedef struct janus_streaming_rtp_relay_packet {
 	janus_vp9_svc_info svc_info;
 	/* The following is only relevant for datachannels */
 	gboolean textdata;
+	/* The following is only relevant for rtp */
+	guint64 time_in;
 } janus_streaming_rtp_relay_packet;
 static janus_streaming_rtp_relay_packet exit_packet;
 static void janus_streaming_rtp_relay_packet_free(janus_streaming_rtp_relay_packet *pkt) {
@@ -9554,6 +9556,8 @@ static void *janus_streaming_relay_thread(void *data) {
 		}
 		int i = 0;
 		for(i=0; i<num; i++) {
+			packet.time_in = 0;
+
 			if(fds[i].revents & (POLLERR | POLLHUP)) {
 				/* Socket error? */
 				JANUS_LOG(LOG_ERR, "[%s] Error polling: %s... %d (%s)\n", name,
@@ -9643,6 +9647,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					packet.is_video = FALSE;
 					packet.is_keyframe = FALSE;
 					packet.data->type = stream->codecs.pt;
+					packet.time_in = now;
 					/* Is there a recorder? */
 					janus_rtp_header_update(packet.data, &stream->context[0], FALSE, 0);
 					if(stream->skew) {
@@ -9826,6 +9831,7 @@ static void *janus_streaming_relay_thread(void *data) {
 					packet.substream = index;
 					packet.codec = stream->codecs.video_codec;
 					packet.svc = FALSE;
+					packet.time_in = now;
 					if(stream->svc) {
 						/* We're doing SVC: let's parse this packet to see which layers are there */
 						int plen = 0;
@@ -10246,7 +10252,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 				}
 				if(s->pt > 0)
 					packet->data->type = s->pt;
-				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length };
+				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length, .time_in = packet->time_in };
 				janus_plugin_rtp_extensions_reset(&rtp.extensions);
 				if(s->min_delay > -1 && s->max_delay > -1) {
 					rtp.extensions.min_delay = s->min_delay;
@@ -10328,7 +10334,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 				if(s->pt > 0)
 					packet->data->type = s->pt;
 				/* Send the packet */
-				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length };
+				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length, .time_in = packet->time_in };
 				janus_plugin_rtp_extensions_reset(&rtp.extensions);
 				if(s->min_delay > -1 && s->max_delay > -1) {
 					rtp.extensions.min_delay = s->min_delay;
@@ -10356,7 +10362,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 				janus_rtp_header_update(packet->data, &s->context, TRUE, 0);
 				if(s->pt > 0)
 					packet->data->type = s->pt;
-				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length };
+				janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length, .time_in = packet->time_in };
 				janus_plugin_rtp_extensions_reset(&rtp.extensions);
 				if(s->min_delay > -1 && s->max_delay > -1) {
 					rtp.extensions.min_delay = s->min_delay;
@@ -10381,7 +10387,7 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 			janus_rtp_header_update(packet->data, &s->context, FALSE, 0);
 			if(s->pt > 0)
 				packet->data->type = s->pt;
-			janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length };
+			janus_plugin_rtp rtp = { .mindex = s->mindex, .video = packet->is_video, .buffer = (char *)packet->data, .length = packet->length, .time_in = packet->time_in };
 			janus_plugin_rtp_extensions_reset(&rtp.extensions);
 			if(gateway != NULL)
 				gateway->relay_rtp(session->handle, &rtp);
@@ -10466,6 +10472,7 @@ static void janus_streaming_helper_rtprtcp_packet(gpointer data, gpointer user_d
 	copy->ptype = packet->ptype;
 	copy->timestamp = packet->timestamp;
 	copy->seq_number = packet->seq_number;
+	copy->time_in = packet->time_in;
 	g_async_queue_push(helper->queued_packets, copy);
 }
 

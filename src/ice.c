@@ -475,6 +475,7 @@ typedef struct janus_ice_queued_packet {
 	gboolean retransmission;
 	gboolean encrypted;
 	gint64 added;
+	gint64 time_in;
 } janus_ice_queued_packet;
 /* A few static, fake, messages we use as a trigger: e.g., to start a
  * new DTLS handshake, hangup a PeerConnection or close a handle */
@@ -4887,6 +4888,16 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 					janus_ice_free_rtp_packet(p);
 				} else {
 					/* Shoot! */
+					if (pkt->time_in) {
+						medium->out_stats.pkt_count++;
+						medium->out_stats.latency += (janus_get_monotonic_time() - pkt->time_in);
+						// JANUS_LOG(LOG_ERR, "latency: %"SCNu64", count: %"SCNu64"\n", medium->out_stats.latency, medium->out_stats.pkt_count);
+						if (medium->out_stats.pkt_count > 10000) {
+							JANUS_LOG(LOG_ERR, "mean latency: %"SCNu64"\n", medium->out_stats.latency / medium->out_stats.pkt_count);
+							medium->out_stats.pkt_count = 0;
+							medium->out_stats.latency = 0;
+						}
+					}
 					int sent = nice_agent_send(handle->agent, pc->stream_id, pc->component_id, protected, pkt->data);
 					if(sent < protected) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] ... only sent %d bytes? (was %d)\n", handle->handle_id, sent, protected);
@@ -5040,6 +5051,7 @@ void janus_ice_relay_rtp(janus_ice_handle *handle, janus_plugin_rtp *packet) {
 	pkt->label = NULL;
 	pkt->protocol = NULL;
 	pkt->added = janus_get_monotonic_time();
+	pkt->time_in = packet->time_in;
 	janus_ice_queue_packet(handle, pkt);
 }
 
@@ -5082,6 +5094,7 @@ void janus_ice_relay_rtcp_internal(janus_ice_handle *handle, janus_ice_peerconne
 	pkt->label = NULL;
 	pkt->protocol = NULL;
 	pkt->added = janus_get_monotonic_time();
+	pkt->time_in = 0;
 	janus_ice_queue_packet(handle, pkt);
 	if(rtcp_buf != packet->buffer) {
 		/* We filtered the original packet, deallocate it */

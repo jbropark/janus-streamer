@@ -604,6 +604,7 @@ struct janus_plugin_rtp {
 	uint16_t length;
 	/*! \brief RTP extensions */
 	janus_plugin_rtp_extensions extensions;
+	guint64 time_in;
 };
 /*! \brief Helper method to initialise/reset the RTP packet
  * @note The main motivation for this method comes from the presence of the
