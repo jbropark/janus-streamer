@@ -428,6 +428,9 @@ struct janus_ice_handle {
 	volatile gint destroyed;
 	/*! \brief Reference counter for this instance */
 	janus_refcount ref;
+
+	guint64 pkt_count;
+	guint64 latency;
 };
 
 /*! \brief Janus handle WebRTC PeerConnection */
