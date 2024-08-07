@@ -10510,6 +10510,7 @@ static int janus_streaming_context_append_relay_packet(janus_streaming_context *
 	sctx->packets[sctx->count].video = packet->is_video;
 	sctx->packets[sctx->count].buffer = (char *)packet->data;
 	sctx->packets[sctx->count].length = packet->length;
+	sctx->packets[sctx->count].time_in = packet->time_in;
 	janus_plugin_rtp_extensions_reset(&sctx->packets[sctx->count].extensions);
 	sctx->count += 1;
 

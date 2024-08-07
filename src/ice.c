@@ -5086,7 +5086,10 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 
 	unsigned int bytes = 0;
 	uint16_t prev = 0;
-	int msgcount = 0;
+	uint32_t msgcount = 0;
+
+	guint64 time_in_sum = 0;
+	uint32_t time_in_count = 0;
 
 	for (int i = 0; i < sctx->count; i++) {
 		janus_plugin_rtp *packet = &sctx->packets[i];
@@ -5213,6 +5216,9 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 				handle->handle_id, janus_srtp_error_str(res), pkt->length, protected, timestamp, seq);
 			janus_ice_free_rtp_packet(p);
 		} else {
+			time_in_sum += packet->time_in;
+			time_in_count++;
+
 			/* Append */
 			if (prev == 0 || prev < protected) {
 				msgcount++;  // append new message
@@ -5259,6 +5265,16 @@ void janus_ice_streaming_relay_rtps(janus_ice_handle *handle, janus_streaming_co
 			} else {
 				janus_ice_free_rtp_packet(p);
 			}
+		}
+	}
+
+	if (time_in_sum && time_in_count) {
+		handle->pkt_count += time_in_count;
+		handle->latency += (janus_get_monotonic_time() * time_in_count - time_in_sum);
+		if (handle->pkt_count >= 5000) {
+			JANUS_LOG(LOG_ERR, "mean latency: %"SCNu64"\n", handle->latency / handle->pkt_count);
+			handle->pkt_count = 0;
+			handle->latency = 0;
 		}
 	}
 
