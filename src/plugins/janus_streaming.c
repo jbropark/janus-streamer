@@ -10542,11 +10542,48 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 	gateway->relay_streaming_rtps(session->handle, sctx);
 }
 
-#define MAX_BATCH_SIZE 16
+static void align_streaming_context(janus_streaming_context *sctx) {
+	uint16_t max_length = 0;
+	for (int i = 0; i < sctx->count; i++) {
+		if (sctx->packets[i].length > max_length) {
+			max_length = sctx->packets[i].length;
+		}
+	}
+	
+	janus_plugin_rtp temp;
+	int start = 0;
+	for (int i = 0; i < sctx->count; i++) {
+		if (sctx->packets[i].length == max_length) {
+			if (i != start) {
+				temp = sctx->packets[i];
+				sctx->packets[i] = sctx->packets[start];
+				sctx->packets[start] = temp;
+			}
+			start += 1;
+		}
+	}
+
+}
+
+#define MAX_BATCH_SIZE 42
 
 static void *janus_streaming_helper_thread(void *data) {
 	janus_streaming_helper *helper = (janus_streaming_helper *)data;
 	janus_streaming_mountpoint *mp = helper->mp;
+
+	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+	int core_id = helper->id % num_cores;
+	JANUS_LOG(LOG_INFO, "Set core_id to %d out of %d cores\n", core_id, num_cores);
+
+	cpu_set_t cpuset;
+	CPU_ZERO(&cpuset);
+	CPU_SET(core_id, &cpuset);
+
+	pthread_t current_thread = pthread_self();
+	if (pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset)) {
+		JANUS_LOG(LOG_ERR, "Failed to set affinity: %s\n", strerror(errno));
+	}
+
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Joining Streaming helper thread\n", mp->name, helper->id);
 	janus_streaming_rtp_relay_packet *pkt = NULL;
 	janus_streaming_rtp_relay_packet *using_pkts[MAX_BATCH_SIZE];
@@ -10615,6 +10652,7 @@ static void *janus_streaming_helper_thread(void *data) {
 		}
 
 		if (sctx.count > 0) {
+			align_streaming_context(&sctx);
 			janus_mutex_lock(&helper->mutex);
 			g_list_foreach(helper->viewers, janus_streaming_relay_rtp_packets, &sctx);
 			janus_mutex_unlock(&helper->mutex);
