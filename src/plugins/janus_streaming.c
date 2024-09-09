@@ -10571,6 +10571,7 @@ static void *janus_streaming_helper_thread(void *data) {
 	janus_streaming_helper *helper = (janus_streaming_helper *)data;
 	janus_streaming_mountpoint *mp = helper->mp;
 
+	/*
 	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
 	int core_id = helper->id % num_cores;
 	JANUS_LOG(LOG_INFO, "Set core_id to %d out of %d cores\n", core_id, num_cores);
@@ -10583,6 +10584,7 @@ static void *janus_streaming_helper_thread(void *data) {
 	if (pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset)) {
 		JANUS_LOG(LOG_ERR, "Failed to set affinity: %s\n", strerror(errno));
 	}
+	*/
 
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Joining Streaming helper thread\n", mp->name, helper->id);
 	janus_streaming_rtp_relay_packet *pkt = NULL;
