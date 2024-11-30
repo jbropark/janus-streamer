@@ -12,6 +12,7 @@
 #include "plugin.h"
 
 #include <jansson.h>
+#include <netdb.h>
 
 #include "../apierror.h"
 #include "../debug.h"
@@ -84,4 +85,62 @@ void janus_plugin_rtcp_reset(janus_plugin_rtcp *packet) {
 void janus_plugin_data_reset(janus_plugin_data *packet) {
 	if(packet)
 		memset(packet, 0, sizeof(janus_plugin_data));
+}
+
+void init_janus_streaming_context(janus_streaming_context *sctx, int count) {
+	if (!sctx || count <= 0)
+		return;
+
+	sctx->buf = (char*)g_malloc0(MTU * count);
+	sctx->mmsgs = (struct mmsghdr*)g_malloc0(sizeof(struct mmsghdr) * count);
+	sctx->iovecs = (struct iovec*)g_malloc0(sizeof(struct iovec) * count);
+	sctx->packets = (janus_plugin_rtp*)g_malloc0(sizeof(janus_plugin_rtp) * count);
+	sctx->cms = (struct cmsghdr**)g_malloc(sizeof(struct cmsghdr*) * count);
+	sctx->msg_controls = (janus_streaming_cmsghdr*)g_malloc0(sizeof(janus_streaming_cmsghdr) * count);
+	for (int i = 0; i < count; i++) {
+		sctx->mmsgs[i].msg_hdr.msg_iov = &sctx->iovecs[i];
+		sctx->mmsgs[i].msg_hdr.msg_iovlen = 1;
+		sctx->mmsgs[i].msg_hdr.msg_control = &sctx->msg_controls[i];
+		sctx->mmsgs[i].msg_hdr.msg_controllen = sizeof(janus_streaming_cmsghdr);
+		sctx->mmsgs[i].msg_hdr.msg_flags = 0;
+		sctx->cms[i] = CMSG_FIRSTHDR(&sctx->mmsgs[i].msg_hdr);
+		sctx->cms[i]->cmsg_level = IPPROTO_UDP;
+		sctx->cms[i]->cmsg_type = UDP_SEGMENT;
+		sctx->cms[i]->cmsg_len = CMSG_LEN(sizeof(uint16_t));
+	}
+}
+
+void free_janus_streaming_context(janus_streaming_context *sctx) {
+	if (!sctx)
+		return;
+
+	g_free(sctx->buf);
+	g_free(sctx->mmsgs);
+	g_free(sctx->iovecs);
+	g_free(sctx->packets);
+	g_free(sctx->cms);
+	g_free(sctx->msg_controls);
+}
+
+void align_janus_streaming_context(janus_streaming_context *sctx) {
+	uint16_t max_length = 0;
+	for (int i = 0; i < sctx->count; i++) {
+		if (sctx->packets[i].length > max_length) {
+			max_length = sctx->packets[i].length;
+		}
+	}
+	
+	janus_plugin_rtp temp;
+	int start = 0;
+	for (int i = 0; i < sctx->count; i++) {
+		if (sctx->packets[i].length == max_length) {
+			if (i != start) {
+				temp = sctx->packets[i];
+				sctx->packets[i] = sctx->packets[start];
+				sctx->packets[start] = temp;
+			}
+			start += 1;
+		}
+	}
+
 }

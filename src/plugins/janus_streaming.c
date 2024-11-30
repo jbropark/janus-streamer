@@ -944,7 +944,6 @@ multistream-test: {
 #define JANUS_STREAMING_AUTHOR			"Meetecho s.r.l."
 #define JANUS_STREAMING_PACKAGE			"janus.plugin.streaming"
 
-#define MTU 1500
 
 /* Plugin methods */
 janus_plugin *create(void);
@@ -10542,29 +10541,6 @@ static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data)
 	gateway->relay_streaming_rtps(session->handle, sctx);
 }
 
-static void align_streaming_context(janus_streaming_context *sctx) {
-	uint16_t max_length = 0;
-	for (int i = 0; i < sctx->count; i++) {
-		if (sctx->packets[i].length > max_length) {
-			max_length = sctx->packets[i].length;
-		}
-	}
-	
-	janus_plugin_rtp temp;
-	int start = 0;
-	for (int i = 0; i < sctx->count; i++) {
-		if (sctx->packets[i].length == max_length) {
-			if (i != start) {
-				temp = sctx->packets[i];
-				sctx->packets[i] = sctx->packets[start];
-				sctx->packets[start] = temp;
-			}
-			start += 1;
-		}
-	}
-
-}
-
 #define MAX_BATCH_SIZE 42
 
 static void *janus_streaming_helper_thread(void *data) {
@@ -10590,23 +10566,7 @@ static void *janus_streaming_helper_thread(void *data) {
 
 	// alloc packets
 	janus_streaming_context sctx;
-	sctx.buf = (char*)g_malloc0(MTU * MAX_BATCH_SIZE);
-	sctx.mmsgs = (struct mmsghdr*)g_malloc0(sizeof(struct mmsghdr) * MAX_BATCH_SIZE);
-	sctx.iovecs = (struct iovec*)g_malloc0(sizeof(struct iovec) * MAX_BATCH_SIZE);
-	sctx.packets = (janus_plugin_rtp*)g_malloc0(sizeof(janus_plugin_rtp) * MAX_BATCH_SIZE);
-	sctx.cms = (struct cmsghdr**)g_malloc(sizeof(struct cmsghdr*) * MAX_BATCH_SIZE);
-	sctx.msg_controls = (janus_streaming_cmsghdr*)g_malloc0(sizeof(janus_streaming_cmsghdr) * MAX_BATCH_SIZE);
-	for (int i = 0; i < MAX_BATCH_SIZE; i++) {
-		sctx.mmsgs[i].msg_hdr.msg_iov = &sctx.iovecs[i];
-		sctx.mmsgs[i].msg_hdr.msg_iovlen = 1;
-		sctx.mmsgs[i].msg_hdr.msg_control = &sctx.msg_controls[i];
-		sctx.mmsgs[i].msg_hdr.msg_controllen = sizeof(janus_streaming_cmsghdr);
-		sctx.mmsgs[i].msg_hdr.msg_flags = 0;
-		sctx.cms[i] = CMSG_FIRSTHDR(&sctx.mmsgs[i].msg_hdr);
-		sctx.cms[i]->cmsg_level = IPPROTO_UDP;
-		sctx.cms[i]->cmsg_type = UDP_SEGMENT;
-		sctx.cms[i]->cmsg_len = CMSG_LEN(sizeof(uint16_t));
-	}
+	init_janus_streaming_context(&sctx, MAX_BATCH_SIZE);
 
 	while(!g_atomic_int_get(&stopping)
 		  && !g_atomic_int_get(&mp->destroyed)
@@ -10652,7 +10612,7 @@ static void *janus_streaming_helper_thread(void *data) {
 		}
 
 		if (sctx.count > 0) {
-			align_streaming_context(&sctx);
+			align_janus_streaming_context(&sctx);
 			janus_mutex_lock(&helper->mutex);
 			g_list_foreach(helper->viewers, janus_streaming_relay_rtp_packets, &sctx);
 			janus_mutex_unlock(&helper->mutex);
@@ -10667,12 +10627,7 @@ static void *janus_streaming_helper_thread(void *data) {
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Leaving Streaming helper thread\n", mp->name, helper->id);
 
 	/* free packets */
-	g_free(sctx.buf);
-	g_free(sctx.mmsgs);
-	g_free(sctx.iovecs);
-	g_free(sctx.packets);
-	g_free(sctx.cms);
-	g_free(sctx.msg_controls);
+	free_janus_streaming_context(&sctx);
 
 	janus_refcount_decrease(&helper->ref);
 	janus_refcount_decrease(&mp->ref);

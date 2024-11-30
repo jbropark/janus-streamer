@@ -8500,7 +8500,7 @@ static void janus_videoroom_incoming_data_internal(janus_videoroom_session *sess
 			} else {
 				/* Remotization, prefix with a fake RTP header so that we can
 				 * set an SRRC (and use the payload type for binary vs. text) */
-				char buffer[1500];
+				char buffer[MTU];
 				memset(buffer, 0, sizeof(buffer));
 				int buflen = len + 12;
 				if(buflen > (int)sizeof(buffer))	/* FIXME We're going to truncate */
@@ -12625,6 +12625,30 @@ error:
 	return NULL;
 }
 
+static int janus_streaming_context_append_relay_packet(janus_streaming_context *sctx, janus_videoroom_rtp_relay_packet *packet) {
+	if(!sctx || !packet || !packet->data || packet->length < 1) {
+		JANUS_LOG(LOG_ERR, "Invalid packet...\n");
+		return 0;
+	}
+
+	if (packet->is_video) {
+		if (packet->svc) {
+			JANUS_LOG(LOG_ERR, "SVC not supported in this mode\n");
+			return 0;
+		} else if (packet->simulcast) {
+			JANUS_LOG(LOG_ERR, "Simulcast not supported in this mode\n");
+			return 0;
+		}
+	}
+
+	sctx->packets[sctx->count].video = packet->is_video;
+	sctx->packets[sctx->count].buffer = (char *)packet->data;
+	sctx->packets[sctx->count].length = packet->length;
+	sctx->packets[sctx->count].extensions = packet->extensions;
+	sctx->count += 1;
+	return 1;
+}
+
 /* Helper to quickly relay RTP packets from publishers to subscribers */
 static void janus_videoroom_relay_rtp_packet(gpointer data, gpointer user_data) {
 	janus_videoroom_rtp_relay_packet *packet = (janus_videoroom_rtp_relay_packet *)user_data;
@@ -13114,8 +13138,8 @@ static void *janus_videoroom_remote_publisher_thread(void *user_data) {
 	int resfd = 0, bytes = 0;
 	struct pollfd fds[3];
 	int pipe_fd = publisher->pipefd[0];
-	char buffer[1500];
-	memset(buffer, 0, 1500);
+	char buffer[MTU];
+	memset(buffer, 0, MTU);
 	if(pipe_fd == -1) {
 		/* If the pipe file descriptor doesn't exist, it means we're done already,
 		 * and/or we may never be notified about sessions being closed, so give up */
@@ -13218,7 +13242,7 @@ static void *janus_videoroom_remote_publisher_thread(void *user_data) {
 				} else if(fds[i].fd == publisher->remote_rtcp_fd) {
 					/* Got Something on the RTCP socket, we only use this for latching */
 					addrlen = sizeof(remote);
-					bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+					bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 					if(bytes < 0 || (!janus_is_rtp(buffer, bytes) && !janus_is_rtcp(buffer, bytes))) {
 						/* For latching we need an RTP or RTCP packet */
 						continue;
@@ -13228,7 +13252,7 @@ static void *janus_videoroom_remote_publisher_thread(void *user_data) {
 				}
 				/* Got an RTP/RTCP packet */
 				addrlen = sizeof(remote);
-				bytes = recvfrom(fds[i].fd, buffer, 1500, 0, (struct sockaddr *)&remote, &addrlen);
+				bytes = recvfrom(fds[i].fd, buffer, MTU, 0, (struct sockaddr *)&remote, &addrlen);
 				if(bytes < 0) {
 					/* Failed to read? */
 					continue;
@@ -13468,30 +13492,119 @@ static void janus_videoroom_helper_rtpdata_packet(gpointer data, gpointer user_d
 	g_async_queue_push(helper->queued_packets, copy);
 }
 
+static void janus_streaming_relay_rtp_packets(gpointer data, gpointer user_data) {
+	janus_streaming_context *sctx = (janus_streaming_context *)user_data;
+	janus_videoroom_subscriber_stream *stream = (janus_videoroom_subscriber_stream *)data;
+	if(!stream || !g_atomic_int_get(&stream->ready) || g_atomic_int_get(&stream->destroyed) ||
+			!stream->send || !stream->publisher_streams ||
+			!stream->subscriber || stream->subscriber->paused || stream->subscriber->kicked ||
+			!stream->subscriber->session || !stream->subscriber->session->handle ||
+			!g_atomic_int_get(&stream->subscriber->session->started))
+		return;
+	janus_videoroom_publisher_stream *ps = stream->publisher_streams ?
+		stream->publisher_streams->data : NULL;
+	if(ps == NULL)
+		return;
+	janus_videoroom_subscriber *subscriber = stream->subscriber;
+	janus_videoroom_session *session = subscriber->session;
+
+	if(!session || !session->handle) {
+		return;
+	}
+
+	for (int i = 0; i < sctx->count; i++) {
+		janus_plugin_rtp *rtp = &(sctx->packets[i]);
+		janus_rtp_header *header = (janus_rtp_header *)rtp->buffer;
+
+		janus_rtp_header_update(header, &stream->context, rtp->video, 0);
+		/* the other attributes are set on append */
+		rtp->mindex = stream->mindex;
+		if (rtp->video) {
+			if(stream->min_delay > -1 && stream->max_delay > -1) {
+				rtp->extensions.min_delay = stream->min_delay;
+				rtp->extensions.max_delay = stream->max_delay;
+			}
+		}
+	}
+	gateway->relay_streaming_rtps(session->handle, sctx);
+}
+
+#define MAX_BATCH_SIZE 42
+
 static void *janus_videoroom_helper_thread(void *data) {
 	janus_videoroom_helper *helper = (janus_videoroom_helper *)data;
 	janus_videoroom *room = helper->room;
 	janus_videoroom_publisher_stream *ps = NULL;
 	GList *subscribers = NULL;
 	JANUS_LOG(LOG_VERB, "[%s/#%d] Joining VideoRoom helper thread\n", room->room_id_str, helper->id);
+	JANUS_LOG(LOG_ERR, "[%s/#%d] Joining VideoRoom helper thread\n", room->room_id_str, helper->id);
 	janus_videoroom_rtp_relay_packet *pkt = NULL;
-	while(!g_atomic_int_get(&stopping) && !g_atomic_int_get(&room->destroyed) && !g_atomic_int_get(&helper->destroyed)) {
+	janus_videoroom_rtp_relay_packet *using_pkts[MAX_BATCH_SIZE];
+
+	janus_streaming_context sctx;
+	init_janus_streaming_context(&sctx, MAX_BATCH_SIZE);
+
+	janus_videoroom_publisher_stream *prev_ps = NULL;
+
+	while(!g_atomic_int_get(&stopping)
+	      && !g_atomic_int_get(&room->destroyed)
+		  && !g_atomic_int_get(&helper->destroyed)) {
+		
 		pkt = g_async_queue_pop(helper->queued_packets);
 		if(pkt == &exit_packet)
 			break;
-		janus_mutex_lock(&helper->mutex);
-		/* FIXME */
+
+		if (!pkt->is_rtp) {
+			ps = pkt->source;
+
+			janus_mutex_lock(&helper->mutex);
+
+			subscribers = g_hash_table_lookup(helper->subscribers, ps);
+			if(subscribers != NULL) {
+				g_list_foreach(subscribers, janus_videoroom_relay_data_packet, pkt);
+			}
+			janus_mutex_unlock(&helper->mutex);
+			janus_videoroom_rtp_relay_packet_free(pkt);
+			continue;
+		}
+
 		ps = pkt->source;
+		if (ps != prev_ps || sctx.count >= MAX_BATCH_SIZE) {
+			if (prev_ps && sctx.count > 0) {
+				// send and clear
+				align_janus_streaming_context(&sctx);
+				janus_mutex_lock(&helper->mutex);
+				subscribers = g_hash_table_lookup(helper->subscribers, prev_ps);
+				if(subscribers != NULL) {
+					g_list_foreach(subscribers, janus_streaming_relay_rtp_packets, &sctx);
+				}
+				janus_mutex_unlock(&helper->mutex);
+				for (int i = 0; i < sctx.count; i++) {
+					janus_videoroom_rtp_relay_packet_free(using_pkts[i]);
+				}
+				sctx.count = 0;
+			}
+			prev_ps = ps;
+		}
+
+		// append
+		if (janus_streaming_context_append_relay_packet(&sctx, pkt)) {
+			using_pkts[sctx.count - 1] = pkt;
+			continue;
+		}
+
+		janus_mutex_lock(&helper->mutex);
 		subscribers = g_hash_table_lookup(helper->subscribers, ps);
 		if(subscribers != NULL) {
-			g_list_foreach(subscribers,
-				pkt->is_rtp ? janus_videoroom_relay_rtp_packet : janus_videoroom_relay_data_packet,
-				pkt);
+			g_list_foreach(subscribers, janus_videoroom_relay_rtp_packet, pkt);
 		}
 		janus_mutex_unlock(&helper->mutex);
 		janus_videoroom_rtp_relay_packet_free(pkt);
 	}
 	JANUS_LOG(LOG_VERB, "[%s/#%d] Leaving VideoRoom helper thread\n", room->room_id_str, helper->id);
+
+	free_janus_streaming_context(&sctx);
+
 	janus_refcount_decrease(&helper->ref);
 	janus_refcount_decrease(&room->ref);
 	g_thread_unref(g_thread_self());

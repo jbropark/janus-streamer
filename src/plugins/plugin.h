@@ -157,10 +157,13 @@ janus_plugin *create(void) {
 #include <unistd.h>
 #include <inttypes.h>
 #include <sys/socket.h>
+#include <linux/udp.h>
 
 #include <glib.h>
 
 #include "refcount.h"
+
+#define MTU 1500
 
 
 /*! \brief Version of the API, to match the one plugins were compiled against
@@ -649,6 +652,10 @@ struct janus_streaming_context {
 	char *buf;
 	int count;
 };
+
+void init_janus_streaming_context(janus_streaming_context *sctx, int count);
+void free_janus_streaming_context(janus_streaming_context *sctx);
+void align_janus_streaming_context(janus_streaming_context *sctx);
 
 /*! \brief Janus plugin RTCP packet */
 struct janus_plugin_rtcp {
