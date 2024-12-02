@@ -10498,12 +10498,9 @@ static int janus_streaming_context_append_relay_packet(janus_streaming_context *
 		return 0;
 	}
 
-	sctx->packets[sctx->count].mindex = packet->mindex;
-	sctx->packets[sctx->count].video = packet->is_video;
-	sctx->packets[sctx->count].buffer = (char *)packet->data;
-	sctx->packets[sctx->count].length = packet->length;
-	janus_plugin_rtp_extensions_reset(&sctx->packets[sctx->count].extensions);
-	sctx->count += 1;
+	janus_plugin_rtp_extensions extensions;
+	janus_plugin_rtp_extensions_reset(&extensions);
+	janus_streaming_context_append(sctx, packet->is_video, (char*)packet->data, packet->length, extensions);
 
 	return 1;
 }
@@ -10566,7 +10563,7 @@ static void *janus_streaming_helper_thread(void *data) {
 
 	// alloc packets
 	janus_streaming_context sctx;
-	init_janus_streaming_context(&sctx, MAX_BATCH_SIZE);
+	janus_streaming_context_init(&sctx, MAX_BATCH_SIZE);
 
 	while(!g_atomic_int_get(&stopping)
 		  && !g_atomic_int_get(&mp->destroyed)
@@ -10612,7 +10609,7 @@ static void *janus_streaming_helper_thread(void *data) {
 		}
 
 		if (sctx.count > 0) {
-			align_janus_streaming_context(&sctx);
+			janus_streaming_context_reorder(&sctx);
 			janus_mutex_lock(&helper->mutex);
 			g_list_foreach(helper->viewers, janus_streaming_relay_rtp_packets, &sctx);
 			janus_mutex_unlock(&helper->mutex);
@@ -10627,7 +10624,7 @@ static void *janus_streaming_helper_thread(void *data) {
 	JANUS_LOG(LOG_INFO, "[%s/#%d] Leaving Streaming helper thread\n", mp->name, helper->id);
 
 	/* free packets */
-	free_janus_streaming_context(&sctx);
+	janus_streaming_context_free(&sctx);
 
 	janus_refcount_decrease(&helper->ref);
 	janus_refcount_decrease(&mp->ref);

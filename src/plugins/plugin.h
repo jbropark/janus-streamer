@@ -236,8 +236,6 @@ typedef struct janus_plugin_rtcp janus_plugin_rtcp;
 /*! \brief Data message exchanged with the core */
 typedef struct janus_plugin_data janus_plugin_data;
 
-typedef struct janus_plugin_streaming_rtp janus_plugin_streaming_rtp;
-
 typedef struct janus_streaming_context janus_streaming_context;
 
 /* Use forward declaration to avoid including jansson.h */
@@ -631,13 +629,6 @@ void janus_plugin_rtp_reset(janus_plugin_rtp *packet);
 */
 janus_plugin_rtp *janus_plugin_rtp_duplicate(janus_plugin_rtp *packet);
 
-struct janus_plugin_streaming_rtp {
-	struct janus_plugin_rtp packet;
-	int mindex;
-	char *buffer;
-	uint16_t length;
-};
-
 typedef union janus_streaming_cmsghdr {
 	struct cmsghdr cmsg;
 	char buf[CMSG_SPACE(sizeof(uint16_t))];
@@ -653,9 +644,10 @@ struct janus_streaming_context {
 	int count;
 };
 
-void init_janus_streaming_context(janus_streaming_context *sctx, int count);
-void free_janus_streaming_context(janus_streaming_context *sctx);
-void align_janus_streaming_context(janus_streaming_context *sctx);
+void janus_streaming_context_init(janus_streaming_context *sctx, int count);
+void janus_streaming_context_free(janus_streaming_context *sctx);
+void janus_streaming_context_reorder(janus_streaming_context *sctx);
+void janus_streaming_context_append(janus_streaming_context *sctx, int is_video, char *buffer, uint16_t length, janus_plugin_rtp_extensions extensions);
 
 /*! \brief Janus plugin RTCP packet */
 struct janus_plugin_rtcp {

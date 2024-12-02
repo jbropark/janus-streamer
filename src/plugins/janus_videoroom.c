@@ -12641,11 +12641,7 @@ static int janus_streaming_context_append_relay_packet(janus_streaming_context *
 		}
 	}
 
-	sctx->packets[sctx->count].video = packet->is_video;
-	sctx->packets[sctx->count].buffer = (char *)packet->data;
-	sctx->packets[sctx->count].length = packet->length;
-	sctx->packets[sctx->count].extensions = packet->extensions;
-	sctx->count += 1;
+	janus_streaming_context_append(sctx, packet->is_video, (char*)packet->data, packet->length, packet->extensions);
 	return 1;
 }
 
@@ -13535,25 +13531,19 @@ static void *janus_videoroom_helper_thread(void *data) {
 	janus_videoroom_helper *helper = (janus_videoroom_helper *)data;
 	janus_videoroom *room = helper->room;
 	janus_videoroom_publisher_stream *ps = NULL;
+	janus_videoroom_publisher_stream *prev_ps = NULL;
 	GList *subscribers = NULL;
 	JANUS_LOG(LOG_VERB, "[%s/#%d] Joining VideoRoom helper thread\n", room->room_id_str, helper->id);
-	JANUS_LOG(LOG_ERR, "[%s/#%d] Joining VideoRoom helper thread\n", room->room_id_str, helper->id);
 	janus_videoroom_rtp_relay_packet *pkt = NULL;
 	janus_videoroom_rtp_relay_packet *using_pkts[MAX_BATCH_SIZE];
-
 	janus_streaming_context sctx;
-	init_janus_streaming_context(&sctx, MAX_BATCH_SIZE);
+	janus_streaming_context_init(&sctx, MAX_BATCH_SIZE);
 
-	janus_videoroom_publisher_stream *prev_ps = NULL;
-
-	while(!g_atomic_int_get(&stopping)
-	      && !g_atomic_int_get(&room->destroyed)
-		  && !g_atomic_int_get(&helper->destroyed)) {
-		
+	while(!g_atomic_int_get(&stopping) && !g_atomic_int_get(&room->destroyed) && !g_atomic_int_get(&helper->destroyed)) {
 		pkt = g_async_queue_pop(helper->queued_packets);
 		if(pkt == &exit_packet)
 			break;
-
+		/* FIXME */
 		if (!pkt->is_rtp) {
 			ps = pkt->source;
 
@@ -13572,7 +13562,7 @@ static void *janus_videoroom_helper_thread(void *data) {
 		if (ps != prev_ps || sctx.count >= MAX_BATCH_SIZE) {
 			if (prev_ps && sctx.count > 0) {
 				// send and clear
-				align_janus_streaming_context(&sctx);
+				janus_streaming_context_reorder(&sctx);
 				janus_mutex_lock(&helper->mutex);
 				subscribers = g_hash_table_lookup(helper->subscribers, prev_ps);
 				if(subscribers != NULL) {
@@ -13596,15 +13586,15 @@ static void *janus_videoroom_helper_thread(void *data) {
 		janus_mutex_lock(&helper->mutex);
 		subscribers = g_hash_table_lookup(helper->subscribers, ps);
 		if(subscribers != NULL) {
-			g_list_foreach(subscribers, janus_videoroom_relay_rtp_packet, pkt);
+			g_list_foreach(subscribers,
+				pkt->is_rtp ? janus_videoroom_relay_rtp_packet : janus_videoroom_relay_data_packet,
+				pkt);
 		}
 		janus_mutex_unlock(&helper->mutex);
 		janus_videoroom_rtp_relay_packet_free(pkt);
 	}
 	JANUS_LOG(LOG_VERB, "[%s/#%d] Leaving VideoRoom helper thread\n", room->room_id_str, helper->id);
-
-	free_janus_streaming_context(&sctx);
-
+	janus_streaming_context_free(&sctx);
 	janus_refcount_decrease(&helper->ref);
 	janus_refcount_decrease(&room->ref);
 	g_thread_unref(g_thread_self());

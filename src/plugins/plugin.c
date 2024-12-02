@@ -87,7 +87,7 @@ void janus_plugin_data_reset(janus_plugin_data *packet) {
 		memset(packet, 0, sizeof(janus_plugin_data));
 }
 
-void init_janus_streaming_context(janus_streaming_context *sctx, int count) {
+void janus_streaming_context_init(janus_streaming_context *sctx, int count) {
 	if (!sctx || count <= 0)
 		return;
 
@@ -110,7 +110,7 @@ void init_janus_streaming_context(janus_streaming_context *sctx, int count) {
 	}
 }
 
-void free_janus_streaming_context(janus_streaming_context *sctx) {
+void janus_streaming_context_free(janus_streaming_context *sctx) {
 	if (!sctx)
 		return;
 
@@ -122,7 +122,7 @@ void free_janus_streaming_context(janus_streaming_context *sctx) {
 	g_free(sctx->msg_controls);
 }
 
-void align_janus_streaming_context(janus_streaming_context *sctx) {
+inline void janus_streaming_context_reorder(janus_streaming_context *sctx) {
 	uint16_t max_length = 0;
 	for (int i = 0; i < sctx->count; i++) {
 		if (sctx->packets[i].length > max_length) {
@@ -143,4 +143,12 @@ void align_janus_streaming_context(janus_streaming_context *sctx) {
 		}
 	}
 
+}
+
+inline void janus_streaming_context_append(janus_streaming_context *sctx, int is_video, char *buffer, uint16_t length, janus_plugin_rtp_extensions extensions) {
+	sctx->packets[sctx->count].video = is_video;
+	sctx->packets[sctx->count].buffer = buffer;
+	sctx->packets[sctx->count].length = length;
+	sctx->packets[sctx->count].extensions = extensions;
+	sctx->count += 1;
 }
