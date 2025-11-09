@@ -607,6 +607,7 @@ void janus_transport_task(gpointer data, gpointer user_data);
 int janus_plugin_push_event(janus_plugin_session *plugin_session, janus_plugin *plugin, const char *transaction, json_t *message, json_t *jsep);
 json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plugin *plugin, const char *sdp_type, const char *sdp, gboolean restart);
 void janus_plugin_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_rtp *packet);
+void janus_plugin_streaming_relay_rtps(janus_plugin_session *handle, janus_streaming_context *sctx);
 void janus_plugin_relay_rtcp(janus_plugin_session *plugin_session, janus_plugin_rtcp *packet);
 void janus_plugin_relay_data(janus_plugin_session *plugin_session, janus_plugin_data *message);
 void janus_plugin_send_pli(janus_plugin_session *plugin_session);
@@ -622,6 +623,7 @@ static janus_callbacks janus_handler_plugin =
 	{
 		.push_event = janus_plugin_push_event,
 		.relay_rtp = janus_plugin_relay_rtp,
+		.relay_streaming_rtps = janus_plugin_streaming_relay_rtps,
 		.relay_rtcp = janus_plugin_relay_rtcp,
 		.relay_data = janus_plugin_relay_data,
 		.send_pli = janus_plugin_send_pli,
@@ -829,6 +831,7 @@ void janus_session_notify_event(janus_session *session, json_t *event) {
 
 /* Destroys a session but does not remove it from the sessions hash table. */
 gint janus_session_destroy(janus_session *session) {
+	return 0;
 	guint64 session_id = session->session_id;
 	JANUS_LOG(LOG_INFO, "Destroying session %"SCNu64"; %p\n", session_id, session);
 	if(!g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
@@ -4218,6 +4221,16 @@ void janus_plugin_relay_rtp(janus_plugin_session *plugin_session, janus_plugin_r
 			|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT))
 		return;
 	janus_ice_relay_rtp(handle, packet);
+}
+
+void janus_plugin_streaming_relay_rtps(janus_plugin_session *plugin_session, janus_streaming_context *sctx) {
+	if((plugin_session < (janus_plugin_session *)0x1000) || g_atomic_int_get(&plugin_session->stopped) || sctx->count < 1)
+		return;
+	janus_ice_handle *handle = (janus_ice_handle *)plugin_session->gateway_handle;
+	if(!handle || janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_STOP)
+			|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT))
+		return;
+	janus_ice_streaming_relay_rtps(handle, sctx);
 }
 
 void janus_plugin_relay_rtcp(janus_plugin_session *plugin_session, janus_plugin_rtcp *packet) {

@@ -156,6 +156,7 @@ janus_plugin *create(void) {
 #include <ctype.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <sys/socket.h>
 
 #include <glib.h>
 
@@ -231,6 +232,10 @@ typedef struct janus_plugin_rtp_extensions janus_plugin_rtp_extensions;
 typedef struct janus_plugin_rtcp janus_plugin_rtcp;
 /*! \brief Data message exchanged with the core */
 typedef struct janus_plugin_data janus_plugin_data;
+
+typedef struct janus_plugin_streaming_rtp janus_plugin_streaming_rtp;
+
+typedef struct janus_streaming_context janus_streaming_context;
 
 /* Use forward declaration to avoid including jansson.h */
 typedef struct json_t json_t;
@@ -368,6 +373,10 @@ struct janus_callbacks {
 	 * @param[in] handle The plugin/gateway session used for this peer
 	 * @param[in] packet The RTP packet and related data */
 	void (* const relay_rtp)(janus_plugin_session *handle, janus_plugin_rtp *packet);
+	/*! \brief Callback to relay RTP packet arrays to a peer
+	 * @param[in] handle The plugin/gateway session used for this peer
+	 * @param[in] packet The RTP packet and related data */
+	void (* const relay_streaming_rtps)(janus_plugin_session *handle, janus_streaming_context *sctx);
 	/*! \brief Callback to relay RTCP messages to a peer
 	 * @param[in] handle The plugin/gateway session that will be used for this peer
 	 * @param[in] packet The RTCP packet and related data */
@@ -618,6 +627,28 @@ void janus_plugin_rtp_reset(janus_plugin_rtp *packet);
  * @returns A pointer to the new janus_plugin_rtp, if successful, or NULL otherwise
 */
 janus_plugin_rtp *janus_plugin_rtp_duplicate(janus_plugin_rtp *packet);
+
+struct janus_plugin_streaming_rtp {
+	struct janus_plugin_rtp packet;
+	int mindex;
+	char *buffer;
+	uint16_t length;
+};
+
+typedef union janus_streaming_cmsghdr {
+	struct cmsghdr cmsg;
+	char buf[CMSG_SPACE(sizeof(uint16_t))];
+} janus_streaming_cmsghdr;
+
+struct janus_streaming_context {
+	struct janus_plugin_rtp *packets;
+	struct mmsghdr *mmsgs;
+	struct iovec *iovecs;
+	struct cmsghdr **cms;
+	janus_streaming_cmsghdr *msg_controls;
+	char *buf;
+	int count;
+};
 
 /*! \brief Janus plugin RTCP packet */
 struct janus_plugin_rtcp {
